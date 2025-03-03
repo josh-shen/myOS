@@ -50,6 +50,37 @@ int printf(const char* restrict format, ...) {
 			if (!print(&c, sizeof(c)))
 				return -1;
 			written++;
+		} else if (*format == 'd') {
+			format++;
+			int num = va_arg(parameters, int);
+			char buffer[11]; /* max integer value is 2147483647 (10 digits), + 1 for '-' */
+			char* ptr;
+			char* low;
+			char* str;
+			str = ptr = buffer;
+			// add '-' for negative numbers
+			if (num < 0)
+				*ptr++ = '-';
+			low = ptr;
+			do {
+				*ptr++ = "zyxwvutsrqponmlkjihgfedcba9876543210123456789abcdefghijklmnopqrstuvwxyz"[35 + num % 10];
+				num /= 10; 
+			} while (num);
+			*ptr-- = '\0';
+			// reverse
+			while (low < ptr) {
+				char temp = *low;
+				*low++ = *ptr;
+				*ptr-- = temp;
+			}
+			size_t len = strlen(str);
+			if (maxrem < len) {
+				// TODO: Set errno to EOVERFLOW.
+				return -1;
+			}
+			if (!print(str, len))
+				return -1;
+			written += len;
 		} else if (*format == 's') {
 			format++;
 			const char* str = va_arg(parameters, const char*);
