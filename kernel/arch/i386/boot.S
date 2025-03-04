@@ -37,3 +37,108 @@ _start:
 1:	hlt
 	jmp 1b
 .size _start, . - _start
+
+# Global Descriptor Table
+.global gdt_flush
+gdt_flush:
+	# Load GDT
+	mov 4(%esp), %eax
+	lgdt (%eax)
+		
+	mov $0x10, %ax
+	mov %ax, %ds
+	mov %ax, %es 
+	mov %ax, %fs
+	mov %ax, %gs 
+	mov %ax, %ss
+
+	jmp $0x08, $flush
+flush:
+	ret
+
+# Tnterrupt Descriptor Table
+.global idt_flush
+idt_flush:
+	# Load IDT
+	mov 4(%esp), %eax
+	lidt (%eax)
+	ret
+
+# Tnterrupt Service Routines
+.macro isr_err_stub num
+.global isr\num
+isr\num:
+	cli
+	push $\num
+	jmp isr_common_stub
+.endm
+
+.macro isr_no_err_stub num
+.global isr\num
+isr\num:
+	cli
+	push $0 # Placeholder error code
+	push $\num
+	jmp isr_common_stub
+.endm
+
+isr_common_stub:
+	pusha				# Push eax, ecx, edx, ebx, esp, ebp, esi, edi
+
+	mov %ds, %ax       	# Move current state to ax
+    push %eax          	# Push the data segment descriptor
+    
+    mov $0x10, %ax     
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
+    
+    call isr_handler
+    
+    pop %eax           	# Reload the original data segment descriptor
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
+    
+    popa                
+    
+    add $8, %esp   		# Cleans up the pushed error code and pushed ISR number
+    sti
+    iret  
+
+# 32 interrupt Service Routines
+.extern isr_handler
+isr_no_err_stub 0
+isr_no_err_stub 1
+isr_no_err_stub 2
+isr_no_err_stub 3
+isr_no_err_stub 4
+isr_no_err_stub 5
+isr_no_err_stub 6
+isr_no_err_stub 7
+isr_err_stub 8
+isr_no_err_stub 9
+isr_err_stub 10
+isr_err_stub 11
+isr_err_stub 12
+isr_err_stub 13
+isr_err_stub 14
+isr_no_err_stub 15
+isr_no_err_stub 16
+isr_no_err_stub 17
+isr_no_err_stub 18
+isr_no_err_stub 19
+isr_no_err_stub 20
+isr_no_err_stub 21
+isr_no_err_stub 22
+isr_no_err_stub 23
+isr_no_err_stub 24
+isr_no_err_stub 25
+isr_no_err_stub 26
+isr_no_err_stub 27
+isr_no_err_stub 28
+isr_no_err_stub 29
+isr_no_err_stub 30
+isr_no_err_stub 31
