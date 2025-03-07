@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <gdt.h>
+#include <interrupts.h>
 
 static gdt_entry_t gdt_entries[5];
 gdt_ptr_t gp;
@@ -20,7 +20,7 @@ void init_gdt() {
     gdt_flush((uint32_t)&gp);
 }
 
-void set_gdt_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
+static void set_gdt_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
     // Encode base
     gdt_entries[num].base_low       = (base & 0xFFFF);
     gdt_entries[num].base_middle    = (base >> 16) & 0xFF;

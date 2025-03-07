@@ -53,7 +53,7 @@ int printf(const char* restrict format, ...) {
 		} else if (*format == 'd') {
 			format++;
 			int num = va_arg(parameters, int);
-			char buffer[11]; /* max integer value is 2147483647 (10 digits), + 1 for '-' */
+			char buffer[11]; // max integer value is 2147483647 (10 digits), + 1 for '-'
 			char* ptr;
 			char* low;
 			char* str;

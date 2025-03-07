@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <idt.h>
+#include <interrupts.h>
 
 static idt_entry_t idt_entries[256];
 idt_ptr_t ip;

@@ -33,7 +33,7 @@ _start:
 	call kernel_main
 
 	# Hang if kernel_main unexpectedly returns.
-	cli
+	# cli
 1:	hlt
 	jmp 1b
 .size _start, . - _start
@@ -82,6 +82,16 @@ isr\num:
 	jmp isr_common_stub
 .endm
 
+# Interrupt Request Routines
+.macro irq_err_stub num val
+.global irq\num
+irq\num:
+	cli
+	push $0
+	push $\val
+	jmp irq_common_stub
+.endm
+
 isr_common_stub:
 	pusha				# Push eax, ecx, edx, ebx, esp, ebp, esi, edi
 
@@ -94,8 +104,10 @@ isr_common_stub:
     mov %ax, %fs
     mov %ax, %gs
     
-    call isr_handler
-    
+	push %esp			# Push handler argument (register struct) to the stack as a pointer
+    call isr_handler 	# Otherwise, values in the struct may be corrupted
+    add $4, %esp	    # Cleans up the pushed register struct pointer
+
     pop %eax           	# Reload the original data segment descriptor
     mov %ax, %ds
     mov %ax, %es
@@ -105,10 +117,36 @@ isr_common_stub:
     popa                
     
     add $8, %esp   		# Cleans up the pushed error code and pushed ISR number
-    sti
     iret  
 
-# 32 interrupt Service Routines
+irq_common_stub:
+	pusha
+
+	mov %ds, %ax
+	push %eax
+
+	mov $0x10, %ax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %fs
+	mov %ax, %gs
+
+	push %esp
+	call irq_handler
+	add $4, %esp
+
+	pop %eax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %fs
+	mov %ax, %gs
+
+	popa
+
+	add $8, %esp
+	iret
+
+# Interrupt Service Routines
 .extern isr_handler
 isr_no_err_stub 0
 isr_no_err_stub 1
@@ -142,3 +180,22 @@ isr_no_err_stub 28
 isr_no_err_stub 29
 isr_no_err_stub 30
 isr_no_err_stub 31
+
+# Interrupt Request Routines
+.extern irq_handler
+irq_err_stub 0, 32
+irq_err_stub 1, 33
+irq_err_stub 2, 34
+irq_err_stub 3, 35
+irq_err_stub 4, 36
+irq_err_stub 5, 37
+irq_err_stub 6, 38
+irq_err_stub 7, 39
+irq_err_stub 8, 40
+irq_err_stub 9, 41
+irq_err_stub 10, 42
+irq_err_stub 11, 43
+irq_err_stub 12, 44
+irq_err_stub 13, 45
+irq_err_stub 14, 46
+irq_err_stub 15, 47

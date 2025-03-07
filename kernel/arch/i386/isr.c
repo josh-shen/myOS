@@ -1,8 +1,6 @@
 #include <stdio.h>
 
-#include <idt.h>
-#include <isr.h>
-#include <tty.h>
+#include <interrupts.h>
 
 extern void set_idt_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 extern void isr0();
@@ -76,5 +74,4 @@ void init_isr() {
 void isr_handler(registers_t regs) {
    printf("\nrecieved interrupt: 0x%d\n", regs.int_num);
    __asm__ volatile ("hlt");
-
 } 
