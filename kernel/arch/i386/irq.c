@@ -11,6 +11,8 @@
 #define PIC_S_C PIC_S
 #define PIC_S_D (PIC_S + 1)
 
+static isr_t interrupt_handlers[16] = {((void *)0)};
+
 static void remap_irq(void);
 extern void set_idt_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 extern void irq0();
@@ -29,8 +31,6 @@ extern void irq12();
 extern void irq13();
 extern void irq14();
 extern void irq15();
-
-isr_t interrupt_handlers[16] = {((void *)0)};
 
 static void remap_irq() {
     outb(PIC_M_C, 0x11);
@@ -78,12 +78,12 @@ void irq_eoi(uint8_t irq_num) {
 }
 
 void irq_handler(registers_t regs) {
-    __asm__ volatile ("cli"); // disable interrupts
-    if (regs.int_num >= 32 && regs.int_num <= 47 && interrupt_handlers[regs.int_num] != ((void *)0)) {  
+    __asm__ volatile ("cli");
+    if (regs.int_num >= 32 && regs.int_num <= 47 && interrupt_handlers[regs.int_num - 32] != ((void *)0)) {  
         isr_t handler = interrupt_handlers[regs.int_num - 32];
         handler(regs);
     } else {
         irq_eoi(regs.int_num - 32);
     }
-    __asm__ volatile ("sti"); // enable interrupts
+    __asm__ volatile ("sti");
 }

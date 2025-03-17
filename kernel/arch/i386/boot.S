@@ -82,16 +82,6 @@ isr\num:
 	jmp isr_common_stub
 .endm
 
-# Interrupt Request Routines
-.macro irq_err_stub num val
-.global irq\num
-irq\num:
-	cli
-	push $0
-	push $\val
-	jmp irq_common_stub
-.endm
-
 isr_common_stub:
 	pusha				# Push eax, ecx, edx, ebx, esp, ebp, esi, edi
 
@@ -119,34 +109,6 @@ isr_common_stub:
     add $8, %esp   		# Cleans up the pushed error code and pushed ISR number
     iret  
 
-irq_common_stub:
-	pusha
-
-	mov %ds, %ax
-	push %eax
-
-	mov $0x10, %ax
-	mov %ax, %ds
-	mov %ax, %es
-	mov %ax, %fs
-	mov %ax, %gs
-
-	push %esp
-	call irq_handler
-	add $4, %esp
-
-	pop %eax
-	mov %ax, %ds
-	mov %ax, %es
-	mov %ax, %fs
-	mov %ax, %gs
-
-	popa
-
-	add $8, %esp
-	iret
-
-# Interrupt Service Routines
 .extern isr_handler
 isr_no_err_stub 0
 isr_no_err_stub 1
@@ -182,6 +144,42 @@ isr_no_err_stub 30
 isr_no_err_stub 31
 
 # Interrupt Request Routines
+.macro irq_err_stub num val
+.global irq\num
+irq\num:
+	cli
+	push $0
+	push $\val
+	jmp irq_common_stub
+.endm
+
+irq_common_stub:
+	pusha
+
+	mov %ds, %ax
+	push %eax
+
+	mov $0x10, %ax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %fs
+	mov %ax, %gs
+
+	push %esp
+	call irq_handler
+	add $4, %esp
+
+	pop %eax
+	mov %ax, %ds
+	mov %ax, %es
+	mov %ax, %fs
+	mov %ax, %gs
+
+	popa
+
+	add $8, %esp
+	iret
+
 .extern irq_handler
 irq_err_stub 0, 32
 irq_err_stub 1, 33
