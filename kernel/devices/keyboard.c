@@ -31,7 +31,7 @@ void keyboard_callback() {
         #include <scancodes.h>
         #undef KEY
     }
-    if (scancode == 0x2A | scancode == 0x36 | scancode == 0xAA | scancode == 0xB6)
+    if ((scancode == 0x2A) | (scancode == 0x36) | (scancode == 0xAA) | (scancode == 0xB6))
         keyboard_shift = keydown;
     if (keydown)
         printf("%c", key_val);

@@ -12,7 +12,6 @@ KEY(0x0B, "0)")
 KEY(0x0C, "-_")
 KEY(0x0D, "=+")
 KEY(0x0E, "") // Backspace
-KEY(0x0F, "\t") 
 KEY(0x10, "qQ")
 KEY(0x11, "wW")
 KEY(0x12, "eE")

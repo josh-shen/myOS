@@ -56,7 +56,7 @@ void init_isr(void);
 void isr_handler(registers_t regs);
 
 /* Interrupt Requests */
-typedef void (*isr_t)(registers_t);
+typedef void (*isr_t)();
 
 void init_irq(void);
 void set_irq_handler(uint8_t n, isr_t handler);

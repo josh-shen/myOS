@@ -13,7 +13,7 @@ void kernel_main(void) {
 	init_irq(); // Interrupts enabled
 	
 	printf("Hello, kernel World!\n");
-	printf("%d %d\n", 0, 123456789);
+	printf("%d %d %x\n", 0, 123456789, 1234);
 	// asm volatile ("int $0x3");
 	//init_timer(1);
 	init_keyboard();
