@@ -3,10 +3,11 @@
 
 #include <interrupts.h>
 
+static void set_gdt_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
+
 static gdt_entry_t gdt_entries[5];
 gdt_ptr_t gp;
 
-static void set_gdt_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 extern void gdt_flush(uint32_t);
 
 void init_gdt() {
