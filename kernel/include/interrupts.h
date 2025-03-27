@@ -41,7 +41,7 @@ typedef struct idt_ptr idt_ptr_t;
 void init_idt(void);
 void set_idt_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 
-/* Registers */
+/* Interrupt Service Routines */
 struct registers {
    uint32_t esp_dump;                                 // Function argument pointer
    uint32_t ds;                                       // Processor state before interrupt
@@ -51,7 +51,6 @@ struct registers {
 };
 typedef struct registers registers_t; 
 
-/* Interrupt Service Routines */
 void init_isr(void);
 void isr_handler(registers_t regs);
 

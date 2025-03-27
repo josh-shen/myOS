@@ -74,4 +74,5 @@ void init_isr() {
 void isr_handler(registers_t regs) {
    printf("\nrecieved interrupt: 0x%d\n", regs.int_num);
    __asm__ volatile ("hlt");
+   // TODO: implement actual interrupt handling
 } 
