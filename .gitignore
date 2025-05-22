@@ -1,4 +1,8 @@
-*.iso
+.vscode
 isodir
 sysroot
-.vscode
+*.a
+*.d
+*.iso
+*.kernel
+*.o
