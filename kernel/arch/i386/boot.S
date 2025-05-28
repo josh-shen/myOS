@@ -12,8 +12,13 @@
 .long FLAGS
 .long CHECKSUM
 
-# Reserve a stack for the initial thread.
 .section .bss
+# Initialize pointer for multiboot info struct.
+.align 4
+.global multiboot_info_ptr
+multiboot_info_ptr: 
+	.long 0
+# Reserve a stack for the initial thread.
 .align 16
 stack_bottom:
 .skip 16384 # 16 KiB
@@ -24,6 +29,9 @@ stack_top:
 .global _start
 .type _start, @function
 _start:
+	# Save multiboot info from ebx.
+	movl %ebx, (multiboot_info_ptr)
+
 	movl $stack_top, %esp
 
 	# Call the global constructors.
