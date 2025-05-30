@@ -83,7 +83,7 @@ int printf(const char* restrict format, ...) {
 			written += len;
 		} else if (*format == 'x') {
 			format++;
-			int num = va_arg(parameters, int);
+			unsigned int num = va_arg(parameters, unsigned int);
 			char buffer[8];
 			char* ptr;
 			char* low;

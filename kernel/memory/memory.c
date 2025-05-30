@@ -43,9 +43,9 @@ void init_memory() {
     }
 
     // Pointer to first memory map entry
-    mmap_entry_t *mmap_entry = (mmap_entry_t *)(uintptr_t)mbi->mmap_addr;
+    mmap_entry_t *mmap_entry = (mmap_entry_t *)mbi->mmap_addr;
 
-    while((uintptr_t)mmap_entry < (uintptr_t)mbi->mmap_addr + mbi->mmap_length) {
+    while((uintptr_t)mmap_entry < mbi->mmap_addr + mbi->mmap_length) {
         uint64_t base_addr = ((uint64_t)mmap_entry->base_addr_high << 32) | mmap_entry->base_addr_low;
         uint64_t length = ((uint64_t)mmap_entry->length_high << 32) | mmap_entry->length_low;
         
@@ -61,7 +61,6 @@ void init_memory() {
         // Add memory map entry size + size field
         mmap_entry = (mmap_entry_t *)((uintptr_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
     }
-    printf("%x", pmm_bitmap[19]);
 
     // bitmap size is 4094 bytes (32752 / 8), < 4KB. The first frame of the bitmap goes to the bitmap itself
 }
