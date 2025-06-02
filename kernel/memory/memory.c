@@ -8,10 +8,13 @@ static void mark_free(uint64_t, uint64_t);
 static void mark_used(uint64_t, uint64_t);
 
 extern multiboot_info_t *multiboot_info_ptr;
+extern char kernel_start;
+extern char kernel_end;
 
-#define FRAME_SIZE 4096                     // 4 KB pages
-#define MAX_FRAMES 32752                    // Total frames of memory
-uint8_t pmm_bitmap[MAX_FRAMES / 8] = {1};   // Each bit of a byte represents a frame
+#define FRAME_SIZE 4096                         // 4 KB pages
+#define MAX_FRAMES 32752                        // Total frames of memory
+uint8_t pmm_bitmap[MAX_FRAMES / 8]              // Each bit of a byte represents a frame
+__attribute__((section(".pmm_bitmap"))) = {1};  
 
 static void mark_free(uint64_t base, uint64_t len) {
     for (uint64_t curr_frame = base; curr_frame < base + len; curr_frame += FRAME_SIZE) {
@@ -35,7 +38,7 @@ static void mark_used(uint64_t base, uint64_t len) {
 
 void init_memory() {
     multiboot_info_t *mbi = multiboot_info_ptr;
-	    
+	
     // Check if bit 6 of flags is set
     if (!(mbi->flags & (1 << 6))) {
         printf("Memory map not available\n");
@@ -62,5 +65,9 @@ void init_memory() {
         mmap_entry = (mmap_entry_t *)((uintptr_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
     }
 
-    // bitmap size is 4094 bytes (32752 / 8), < 4KB. The first frame of the bitmap goes to the bitmap itself
+    mark_used((uintptr_t)&kernel_start, (uintptr_t)&kernel_end - (uintptr_t)&kernel_start); // Kernel, includse kernel stack and PMM bitmap
+    mark_used((uintptr_t)multiboot_info_ptr, sizeof(multiboot_info_t));                     // MBI struct
+    mark_used(mbi->mmap_addr, mbi->mmap_length);                                            // Memory map buffer
+    mark_used(0xB80000, 8000);                                                              // VGA memory
+    // TODO: mark areas used by boot modules (mods_*)                  
 }

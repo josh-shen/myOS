@@ -9,6 +9,7 @@ SECTIONS
 	/* Begin putting sections at 1 MiB, a conventional place for kernels to be
 	   loaded at by the bootloader. */
 	. = 1M;
+	kernel_start = .;
 
 	/* First put the multiboot header, as it is required to be put very early
 	   early in the image or the bootloader won't recognize the file format.
@@ -38,6 +39,13 @@ SECTIONS
 		*(.bss)
 	}
 
+	/* PMM bitmap array */
+	.pmm_bitmap ALIGN(4k) : {
+		pmm_bitmap_start = .;
+		*(.pmm_bitmap_array)
+	}
+	
+	kernel_end = .;
 	/* The compiler may produce other sections, put them in the proper place in
 	   in this file, if you'd like to include them in the final kernel. */
 }
