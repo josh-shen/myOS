@@ -14,7 +14,7 @@ void kernel_main(void) {
 	init_isr();
 	init_irq(); // Interrupts enabled
 
-	init_memory();
+	pmm_init();
 	
 	//init_timer(1);
 	//init_keyboard();
