@@ -6,33 +6,81 @@
 .set CHECKSUM, -(MAGIC + FLAGS) # checksum of above, to prove we are multiboot
 
 # Declare a header as in the Multiboot Standard.
-.section .multiboot
+.section .multiboot.data, "aw"
 .align 4
 .long MAGIC
 .long FLAGS
 .long CHECKSUM
 
-.section .bss
-# Initialize pointer for multiboot info struct.
-.align 4
-.global multiboot_info_ptr
-multiboot_info_ptr: 
-	.long 0
 # Reserve a stack for the initial thread.
+.section .bootstrap_stack, "aw", @nobits
 .align 16
 stack_bottom:
 .skip 16384 # 16 KiB
 stack_top:
 
+# Preallocate pages used for paging.	
+.section .bss, "aw", @nobits
+.align 4096
+boot_page_directory:
+	.skip 4096
+boot_page_table:
+	.skip 4096
+
 # The kernel entry point.
-.section .text
+.section .multiboot.text, "a"
 .global _start
 .type _start, @function
 _start:
 	# Save multiboot info from ebx.
-	movl %ebx, (multiboot_info_ptr)
+	movl $(stack_top - 0xC0000000), %esp
+	push %ebx
+	push %eax
 
-	movl $stack_top, %esp
+	# Map first 4 MiB of memory to higher half and enable paging.
+	movl $(boot_page_table - 0xC0000000), %edi 	# physical address of current page table entry
+	movl $0, %esi								# physical address of current page to map
+	movl $1023, %ecx 							# loop counter
+1:	
+	movl %esi, %edx
+	# Add flag bits to the page table entry 
+	orl $0x003, %edx
+	movl %edx, (%edi)
+	addl $4096, %esi
+	addl $4, %edi
+	loop 1b
+	# TODO: .text and .rodata are mapped as writable. They should be read-only.
+
+	# Map the VGA buffer to the last page (1023).
+	movl $(0x000B8000 | 0x003), boot_page_table - 0xC0000000 + 1023 * 4
+
+	# Add identity mapping and higher-half mapping of the first 4 MiB to the page directory
+	movl $(boot_page_table - 0xC0000000 + 0x003), boot_page_directory - 0xC0000000 + 0
+	movl $(boot_page_table - 0xC0000000 + 0x003), boot_page_directory - 0xC0000000 + 768 * 4
+
+	# Load the page directory into CR3.
+	movl $(boot_page_directory - 0xC0000000), %ecx
+	movl %ecx, %cr3
+
+	# Enable paging and the write-protect bit.
+	movl %cr0, %ecx
+	orl $0x80010000, %ecx
+	movl %ecx, %cr0
+
+	# Jump to higher half with an absolute jump.
+	lea 2f, %ecx
+	jmp *%ecx
+.size _start, . - _start
+.section .text
+2:
+	# Unmap the identity mapping as it is no longer needed.
+	# movl $0, boot_page_directory + 0
+
+	# Flush the TLB.
+	movl %cr3, %ecx
+	movl %ecx, %cr3 
+
+	addl $0xC0000000, %esp
 
 	# Call the global constructors.
 	call _init
@@ -44,7 +92,6 @@ _start:
 	cli
 1:	hlt
 	jmp 1b
-.size _start, . - _start
 
 # Global Descriptor Table
 .global gdt_flush

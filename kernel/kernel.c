@@ -6,7 +6,7 @@
 #include <timer.h>
 #include <keyboard.h>
 
-void kernel_main(void) {
+void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
 	terminal_init();
 		
 	pmm_init();
@@ -22,5 +22,5 @@ void kernel_main(void) {
 
 	//printf("Hello, kernel World!\n");
 	//printf("%d %d %x\n", 0, 123456789, 1234);
-	// asm volatile ("int $0x3");
+	//asm volatile ("int $0x3");
 }

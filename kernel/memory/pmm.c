@@ -8,7 +8,6 @@
 static void mark_free(uint64_t, uint64_t);
 static void mark_used(uint64_t, uint64_t);
 
-extern multiboot_info_t *multiboot_info_ptr;
 extern char kernel_start;
 extern char kernel_end;
 
@@ -45,13 +44,13 @@ static void mark_used(uint64_t base, uint64_t len) {
     }
 }
 
-void pmm_init() {
+void pmm_init(uint32_t multiboot_info_ptr) {
     memset(pmm_bitmap, 0xFF, sizeof(pmm_bitmap));
     pmm.total_frames = TOTAL_FRAMES;
     pmm.free_frames = 0;
     
-    multiboot_info_t *mbi = multiboot_info_ptr;
-	
+    multiboot_info_t *mbi = (multiboot_info_t*)multiboot_info_ptr;
+
     // Check if bit 6 of flags is set for mmap_*
     if (!(mbi->flags & (1 << 6))) {
         printf("Memory map not available\n");
@@ -84,7 +83,9 @@ void pmm_init() {
     mark_used((uintptr_t)multiboot_info_ptr, sizeof(multiboot_info_t));                     // MBI struct
     mark_used(mbi->mmap_addr, mbi->mmap_length);                                            // Memory map buffer
     mark_used(0xB80000, 8000);                                                              // VGA memory
-    // TODO: mark areas used by boot modules (mods_*)                  
+    // TODO: Mark areas used by boot modules (mods_*)
+    
+    // TODO: Unmap the identiy mapping of the first 4 MiB of memory
 }
 
 uint32_t pmm_alloc() {
