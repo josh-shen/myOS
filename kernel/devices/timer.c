@@ -16,8 +16,8 @@ void timer_callback() {
    irq_eoi(TIMER_IRQ);
 }
 
-void init_timer(uint32_t frequency) {
-   set_irq_handler(TIMER_IRQ, &timer_callback);
+void timer_init(uint32_t frequency) {
+   irq_set_handler(TIMER_IRQ, &timer_callback);
    uint32_t divisor = 1193180 / frequency;
    outb(PIT_COM_PORT, 0x36); // 00 (channel 0) 11 (low byte/high byte) 011 (square wave) 0 (16-bit binary)
    // Split divisor into upper/lower bytes

@@ -7,17 +7,18 @@
 #include <keyboard.h>
 
 void kernel_main(void) {
-	terminal_initialize();
+	terminal_init();
 		
-	init_gdt();
-	init_idt();
-	init_isr();
-	init_irq(); // Interrupts enabled
-
 	pmm_init();
+	vmm_init();
 	
-	//init_timer(1);
-	//init_keyboard();
+	gdt_init();
+	idt_init();
+	isr_init();
+	irq_init(); // Interrupts enabled
+	
+	timer_init(1);
+	keyboard_init();
 
 	//printf("Hello, kernel World!\n");
 	//printf("%d %d %x\n", 0, 123456789, 1234);

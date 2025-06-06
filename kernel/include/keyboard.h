@@ -4,6 +4,6 @@
 #define KEY(code, val)
 
 void keyboard_callback(void);
-void init_keyboard(void);
+void keyboard_init(void);
 
 #endif

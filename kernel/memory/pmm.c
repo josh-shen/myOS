@@ -80,8 +80,6 @@ void pmm_init() {
         mmap_entry = (mmap_entry_t *)((uintptr_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
     }
 
-    printf("%d %d", pmm.free_frames, pmm.total_frames);
-
     mark_used((uintptr_t)&kernel_start, (uintptr_t)&kernel_end - (uintptr_t)&kernel_start); // Kernel, includes kernel stack and PMM bitmap
     mark_used((uintptr_t)multiboot_info_ptr, sizeof(multiboot_info_t));                     // MBI struct
     mark_used(mbi->mmap_addr, mbi->mmap_length);                                            // Memory map buffer
@@ -89,10 +87,10 @@ void pmm_init() {
     // TODO: mark areas used by boot modules (mods_*)                  
 }
 
-uint32_t pmm_alloc_frame() {
+uint32_t pmm_alloc() {
 
 }
 
-void pmm_free_frame(uint32_t physical_address) {
+void pmm_free(uint32_t physical_address) {
 
 }

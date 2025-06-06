@@ -38,6 +38,6 @@ void keyboard_callback() {
     irq_eoi(KEYBOARD_IRQ);
 }   
 
-void init_keyboard() {
-    set_irq_handler(KEYBOARD_IRQ, &keyboard_callback);
+void keyboard_init() {
+    irq_set_handler(KEYBOARD_IRQ, &keyboard_callback);
 }

@@ -20,7 +20,7 @@ struct gdt_ptr {
 } __attribute__((packed));
 typedef struct gdt_ptr gdt_ptr_t;
 
-void init_gdt(void);
+void gdt_init(void);
 
 /* Interrupt Descriptor Table */
 struct idt_entry {
@@ -38,8 +38,8 @@ struct idt_ptr {
 } __attribute__((packed));
 typedef struct idt_ptr idt_ptr_t;
 
-void init_idt(void);
-void set_idt_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
+void idt_init(void);
+void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 
 /* Interrupt Service Routines */
 struct registers {
@@ -51,14 +51,14 @@ struct registers {
 };
 typedef struct registers registers_t; 
 
-void init_isr(void);
+void isr_init(void);
 void isr_handler(registers_t regs);
 
 /* Interrupt Requests */
 typedef void (*isr_t)();
 
-void init_irq(void);
-void set_irq_handler(uint8_t n, isr_t handler);
+void irq_init(void);
+void irq_set_handler(uint8_t n, isr_t handler);
 void irq_handler(registers_t regs);
 void irq_eoi(uint8_t irq_num);
 

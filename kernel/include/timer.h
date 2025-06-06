@@ -4,6 +4,6 @@
 #include <stdint.h>
 
 void timer_callback(void);
-void init_timer(uint32_t frequency);
+void timer_init(uint32_t frequency);
 
 #endif
