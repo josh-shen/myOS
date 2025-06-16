@@ -37,19 +37,24 @@ _start:
 	push %ebx
 	push %eax
 
-	# Map first 4 MiB of memory to higher half and enable paging.
-	movl $(boot_page_table - 0xC0000000), %edi 	# physical address of current page table entry
-	movl $0, %esi								# physical address of current page to map
-	movl $1023, %ecx 							# loop counter
+	# Physical address of boot_page_table.
+	movl $(boot_page_table - 0xC0000000), %edi
+	# First address to map is address 0.
+	movl $0, %esi
+	# Map 1023 pages. The 1024th will be the VGA text buffer.
+	movl $1023, %ecx
 1:	
+	# Map physical address as "present, writable".
+	# TODO: .text and .rodata are mapped as writable. They should be read-only.
 	movl %esi, %edx
-	# Add flag bits to the page table entry 
 	orl $0x003, %edx
 	movl %edx, (%edi)
+	# Size of page is 4096 bytes.
 	addl $4096, %esi
+	# Size of entries in boot_page_table is 4 bytes.
 	addl $4, %edi
+	# Loop to the next entry if we haven't finished.
 	loop 1b
-	# TODO: .text and .rodata are mapped as writable. They should be read-only.
 
 	# Map the VGA buffer to the last page (1023).
 	movl $(0x000B8000 | 0x003), boot_page_table - 0xC0000000 + 1023 * 4
@@ -73,9 +78,6 @@ _start:
 .size _start, . - _start
 .section .text
 2:
-	# Unmap the identity mapping as it is no longer needed.
-	# movl $0, boot_page_directory + 0
-
 	# Flush the TLB.
 	movl %cr3, %ecx
 	movl %ecx, %cr3 
