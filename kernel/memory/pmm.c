@@ -11,14 +11,13 @@ static uint8_t get_order(uintptr_t);
 extern char kernel_start;
 extern char kernel_end;
 
-#define MAX_ORDER 11
-
 struct partition {
     struct partition *prev;
     struct partition *next;
 };
 typedef struct partition partition_t;
 
+#define MAX_ORDER 11
 partition_t *free_lists[MAX_ORDER]__attribute__((section(".free_lists")));
 
 // Known used regions 
@@ -59,28 +58,13 @@ static void mark_free(uintptr_t base, uintptr_t len) {
 }
 
 static void filter(uintptr_t base, uintptr_t length) {
+    if (length == 0) return;
+
     for (int i = 0; i < NUM_USED_REGIONS; i++) {
         uintptr_t used_end = used_regions[i][0] + used_regions[i][1];
         uintptr_t end = base + length;
 
-        // Ignore blocks outside current block
-        if (used_end <= base || used_regions[i][0] >= end) continue;
-
-        if (used_regions[i][0] == base && used_end == end) {
-            // Used region covers entire block
-            return;
-        }
-        if (used_regions[i][0] == base && used_end < end) {
-            // Used region is at the very start of the block
-            filter(used_end, end - used_end);
-            return;
-        }
-        if (used_regions[i][0] > base && used_end == end) {
-            // Used region is at the very end of the block
-            filter(base, used_regions[i][0] - base);
-            return;
-        }
-        if (used_regions[i][0] > base && used_end < end) {
+        if (used_regions[i][0] >= base && used_end <= end) {
             filter(base, used_regions[i][0] - base);
             filter(used_end, end - used_end);
             return;
