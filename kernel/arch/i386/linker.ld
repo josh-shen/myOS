@@ -49,14 +49,14 @@ SECTIONS
 		*(.bootstrap_stack)
 	}
 
-	/* PMM bitmap array */
-	.pmm_bitmap ALIGN(4k) : AT (ADDR(.pmm_bitmap) - 0xC0000000)
+	/* Free lists array */
+	.free_lists ALIGN(4k) : AT (ADDR(.free_lists) - 0xC0000000)
 	{
-		pmm_bitmap_start = .;
-		*(.pmm_bitmap_array)
+		free_lists_start = .;
+		*(.free_lists)
 	}
 	
-	kernel_end = .;
+	kernel_end = . - kernel_start - 0xC0000000;
 	/* The compiler may produce other sections, put them in the proper place in
 	   in this file, if you'd like to include them in the final kernel. */
 }
