@@ -29,7 +29,7 @@ uintptr_t used_regions[NUM_USED_REGIONS][2] = {
 
 static uint8_t get_order(uintptr_t length) {
     for (int n = MAX_ORDER - 1; n >= 0; n--) {
-        if ((2 << (n + 11)) < length) return n;
+        if ((uintptr_t)(2 << (n + 11)) < length) return n;
     }
     return 0;
 }
@@ -113,7 +113,7 @@ void pmm_init(uint32_t multiboot_info_ptr) {
 
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
 }
-
+/*
 uint32_t pmm_alloc() {
 
 }
@@ -121,3 +121,4 @@ uint32_t pmm_alloc() {
 void pmm_free(uint32_t physical_address) {
 
 }
+*/
