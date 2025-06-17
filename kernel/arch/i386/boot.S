@@ -41,8 +41,8 @@ _start:
 	movl $(boot_page_table - 0xC0000000), %edi
 	# First address to map is address 0.
 	movl $0, %esi
-	# Map 1023 pages. The 1024th will be the VGA text buffer.
-	movl $1023, %ecx
+	# Map 1024 pages.
+	movl $1024, %ecx
 1:	
 	# Map physical address as "present, writable".
 	# TODO: .text and .rodata are mapped as writable. They should be read-only.
@@ -55,9 +55,6 @@ _start:
 	addl $4, %edi
 	# Loop to the next entry if we haven't finished.
 	loop 1b
-
-	# Map the VGA buffer to the last page (1023).
-	movl $(0x000B8000 | 0x003), boot_page_table - 0xC0000000 + 1023 * 4
 
 	# Add identity mapping and higher-half mapping of the first 4 MiB to the page directory
 	movl $(boot_page_table - 0xC0000000 + 0x003), boot_page_directory - 0xC0000000 + 0

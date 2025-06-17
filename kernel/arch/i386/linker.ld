@@ -52,7 +52,6 @@ SECTIONS
 	/* Free lists array */
 	.free_lists ALIGN(4k) : AT (ADDR(.free_lists) - 0xC0000000)
 	{
-		free_lists_start = .;
 		*(.free_lists)
 	}
 	
