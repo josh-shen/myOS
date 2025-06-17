@@ -3,10 +3,10 @@
 
 #include <interrupts.h>
 
-static idt_entry_t idt_entries[256];
-idt_ptr_t ip;
-
 extern void idt_flush(uint32_t);
+
+static idt_entry_t idt_entries[256];
+static idt_ptr_t ip;
 
 void idt_init() {
     ip.limit = sizeof(idt_entry_t) * 256 - 1;

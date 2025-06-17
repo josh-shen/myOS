@@ -5,10 +5,10 @@
 
 static void gdt_set_gate(int32_t num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 
-static gdt_entry_t gdt_entries[5];
-gdt_ptr_t gp;
-
 extern void gdt_flush(uint32_t);
+
+static gdt_entry_t gdt_entries[5];
+static gdt_ptr_t gp;
 
 void gdt_init() {
     gp.limit = (sizeof(gdt_entry_t) * 5) - 1;

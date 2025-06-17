@@ -6,15 +6,6 @@
 
 static void irq_remap(void);
 
-#define PIC_M 0x20
-#define PIC_M_C PIC_M
-#define PIC_M_D (PIC_M + 1)
-#define PIC_S 0xA0
-#define PIC_S_C PIC_S
-#define PIC_S_D (PIC_S + 1)
-
-static isr_t interrupt_handlers[16] = {((void *)0)};
-
 extern void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 extern void irq0();
 extern void irq1();
@@ -32,6 +23,15 @@ extern void irq12();
 extern void irq13();
 extern void irq14();
 extern void irq15();
+
+#define PIC_M 0x20
+#define PIC_M_C PIC_M
+#define PIC_M_D (PIC_M + 1)
+#define PIC_S 0xA0
+#define PIC_S_C PIC_S
+#define PIC_S_D (PIC_S + 1)
+
+static isr_t interrupt_handlers[16] = {((void *)0)};
 
 static void irq_remap() {
     outb(PIC_M_C, 0x11);

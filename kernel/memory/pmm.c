@@ -5,24 +5,19 @@
 #include <memory.h>
 #include <multiboot.h>
 
+static void filter(uintptr_t, uintptr_t);
 static void mark_free(uintptr_t, uintptr_t);
 static uint8_t get_order(uintptr_t);
 
 extern char kernel_start;
 extern char kernel_end;
 
-struct partition {
-    struct partition *prev;
-    struct partition *next;
-};
-typedef struct partition partition_t;
-
 #define MAX_ORDER 11
-partition_t *free_lists[MAX_ORDER]__attribute__((section(".free_lists")));
+static partition_t *free_lists[MAX_ORDER]__attribute__((section(".free_lists")));
 
 // Known used regions 
 #define NUM_USED_REGIONS 2
-uintptr_t used_regions[NUM_USED_REGIONS][2] = {
+static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
     {(uintptr_t)&kernel_start, (uintptr_t)&kernel_end}, // Kernel, includes kernel stack
     {0xB80000, 8000}                                    // VGA memory
 };
