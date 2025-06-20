@@ -8,14 +8,13 @@
 
 void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
 	terminal_init();
-		
+
 	gdt_init();
 	idt_init();
 	isr_init();
 	irq_init(); // Interrupts enabled
 	
 	pmm_init(multiboot_info_ptr);
-	vmm_init();
 
 	timer_init(1);
 	keyboard_init();

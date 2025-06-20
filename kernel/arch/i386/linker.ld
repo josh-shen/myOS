@@ -41,6 +41,12 @@ SECTIONS
 		*(.data)
 	}
 
+	/* Page tables */
+	.page_tables ALIGN(4K) : AT (ADDR(.page_tables) - 0xC0000000)
+	{
+		*(.page_tables)
+	}
+
 	/* Read-write data (uninitialized) and stack */
 	.bss ALIGN(4K) : AT (ADDR(.bss) - 0xC0000000)
 	{
@@ -55,7 +61,7 @@ SECTIONS
 		*(.free_lists)
 	}
 	
-	kernel_end = . - kernel_start - 0xC0000000;
+	kernel_len = . - kernel_start - 0xC0000000;
 	/* The compiler may produce other sections, put them in the proper place in
 	   in this file, if you'd like to include them in the final kernel. */
 }

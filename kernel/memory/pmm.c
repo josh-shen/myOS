@@ -10,7 +10,7 @@ static void mark_free(uintptr_t, uintptr_t);
 static uint8_t get_order(uintptr_t);
 
 extern char kernel_start;
-extern char kernel_end;
+extern char kernel_len;
 
 #define MAX_ORDER 11
 static partition_t *free_lists[MAX_ORDER]__attribute__((section(".free_lists")));
@@ -18,7 +18,7 @@ static partition_t *free_lists[MAX_ORDER]__attribute__((section(".free_lists")))
 // Known used regions 
 #define NUM_USED_REGIONS 2
 static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
-    {(uintptr_t)&kernel_start, (uintptr_t)&kernel_end}, // Kernel, includes kernel stack
+    {(uintptr_t)&kernel_start, (uintptr_t)&kernel_len}, // Kernel, includes kernel stack
     {0xB80000, 8000}                                    // VGA memory
 };
 
@@ -34,7 +34,7 @@ static void mark_free(uintptr_t base, uintptr_t len) {
         uint8_t order = get_order(len);
         uint32_t partition_size = 2 << (order + 11);
         
-        partition_t *partition = (partition_t *)(uintptr_t)base + 0xC0000000;
+        partition_t *partition = (partition_t *)(uintptr_t)(base + 0xC0000000);        
         if (free_lists[order] == NULL) {
             partition->prev = NULL;
             partition->next = NULL;
@@ -65,13 +65,13 @@ static void filter(uintptr_t base, uintptr_t length) {
             return;
         }
     }
-    printf("free: %x %x\n", base, length);
-    //mark_free(base, length);
+    vmm_map(base, length);
+    mark_free(base, length);
 }
 
 void pmm_init(uint32_t multiboot_info_ptr) {    
     multiboot_info_t *mbi = (multiboot_info_t*)multiboot_info_ptr;
-
+    
     // Check if bit 6 of flags is set for mmap_*
     if (!(mbi->flags & (1 << 6))) {
         printf("Memory map not available\n");
@@ -107,6 +107,9 @@ void pmm_init(uint32_t multiboot_info_ptr) {
     */
 
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
+    for (int i = 0; i < MAX_ORDER; i++) {
+        printf("%x\n", free_lists[i]);
+    }
 }
 /*
 uint32_t pmm_alloc() {

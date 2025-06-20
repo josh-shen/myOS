@@ -15,6 +15,6 @@ uint32_t pmm_alloc(void);
 void pmm_free(uint32_t physical_address);
 
 /* Virtual memory manager */
-void vmm_init(void);
+void vmm_map(uint32_t, uint32_t);
 
 #endif

@@ -19,13 +19,8 @@ stack_bottom:
 .skip 16384 # 16 KiB
 stack_top:
 
-# Preallocate pages used for paging.	
-.section .bss, "aw", @nobits
-.align 4096
-boot_page_directory:
-	.skip 4096
-boot_page_table:
-	.skip 4096
+.extern boot_page_directory
+.extern boot_page_tables
 
 # The kernel entry point.
 .section .multiboot.text, "a"
@@ -38,12 +33,20 @@ _start:
 	push %eax
 
 	# Physical address of boot_page_table.
-	movl $(boot_page_table - 0xC0000000), %edi
+	movl $(boot_page_tables - 0xC0000000), %edi
 	# First address to map is address 0.
 	movl $0, %esi
+	# Map 16 MiB with 4 page tables.
+	movl $4, %ecx
+	# Page directory index.
+	movl $0, %eax
+pde_loop:
+	pushl %ecx
+	# Save the current page table address in ebx.
+	movl %edi, %ebx
 	# Map 1024 pages.
 	movl $1024, %ecx
-1:	
+pte_loop:
 	# Map physical address as "present, writable".
 	# TODO: .text and .rodata are mapped as writable. They should be read-only.
 	movl %esi, %edx
@@ -54,12 +57,29 @@ _start:
 	# Size of entries in boot_page_table is 4 bytes.
 	addl $4, %edi
 	# Loop to the next entry if we haven't finished.
-	loop 1b
+	loop pte_loop
 
-	# Add identity mapping and higher-half mapping of the first 4 MiB to the page directory
-	movl $(boot_page_table - 0xC0000000 + 0x003), boot_page_directory - 0xC0000000 + 0
-	movl $(boot_page_table - 0xC0000000 + 0x003), boot_page_directory - 0xC0000000 + 768 * 4
+	# Get the physical address of current page table from ebx.
+	orl $0x003, %ebx
 
+	# Add identity mapping to the page directory.
+	movl %eax, %edx
+	shll $2, %edx
+	addl $(boot_page_directory - 0xC0000000), %edx
+	movl %ebx, (%edx)
+
+	# Add high-half mapping to the page directory.
+	movl $768, %edx
+	addl %eax, %edx
+	shll $2, %edx
+	addl $(boot_page_directory - 0xC0000000), %edx
+	movl %ebx, (%edx)
+	
+	# Loop to the next page table.
+	inc %eax
+	popl %ecx
+	loop pde_loop
+load:
 	# Load the page directory into CR3.
 	movl $(boot_page_directory - 0xC0000000), %ecx
 	movl %ecx, %cr3
@@ -70,11 +90,11 @@ _start:
 	movl %ecx, %cr0
 
 	# Jump to higher half with an absolute jump.
-	lea 2f, %ecx
+	lea higher_half, %ecx
 	jmp *%ecx
 .size _start, . - _start
 .section .text
-2:
+higher_half:
 	# Flush the TLB.
 	movl %cr3, %ecx
 	movl %ecx, %cr3 
