@@ -16,6 +16,8 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
 	
 	pmm_init(multiboot_info_ptr);
 
+	// TODO: Pass address of command line to kernel
+
 	timer_init(1);
 	keyboard_init();
 

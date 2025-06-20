@@ -100,13 +100,10 @@ void pmm_init(uint32_t multiboot_info_ptr) {
         mmap_entry = (mmap_entry_t *)((uintptr_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
     }
     
-    /* TODO: 
-        Pass address of command line to kernel
-        Mark areas used by boot modules (mods_*)
-        Other multiboot info needed
-    */
-
+    // TODO: Mark areas used by boot modules (mods_*), okther multiboot info needed
+    
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
+
     for (int i = 0; i < MAX_ORDER; i++) {
         printf("%x\n", free_lists[i]);
     }

@@ -1,23 +1,21 @@
 #include <stdint.h>
-#include <stdio.h>
+
 #include <memory.h>
 
 static uint32_t new_page_table(void);
 
-static int next_free_boot_pt_index = 4;
+static int next_free_boot_pt_index = 3;
 
 // 32 page tables required to map 128 MiB of memory
 uint32_t boot_page_directory[1024]__attribute__((section(".page_tables")))__attribute__((aligned(4096)));
 uint32_t boot_page_tables[32][1024]__attribute__((section(".page_tables")))__attribute((aligned(4096)));
 
 static uint32_t new_page_table() {
-    uint32_t *new_pt_virtual = boot_page_tables[next_free_boot_pt_index];
-    next_free_boot_pt_index++;
-    
-    if (next_free_boot_pt_index > 32) {
-        printf("%d out of room\n", next_free_boot_pt_index);
+    if (next_free_boot_pt_index++ > 31) {
         return 0;
     }
+
+    uint32_t *new_pt_virtual = boot_page_tables[next_free_boot_pt_index];
 
     for (int i = 0; i < 1024; i++) {
         new_pt_virtual[i] = 0;
@@ -38,7 +36,9 @@ void vmm_map(uint32_t base, uint32_t len) {
     
         if (!(pde & 0x1)) {
             uint32_t new_pt_phys_addr = new_page_table();
-            
+
+            if (new_pt_phys_addr == 0) return;
+            // TODO: implement actual error handling for running out of space            
             boot_page_directory[pde_index] = new_pt_phys_addr + 0x003;
         }
 
