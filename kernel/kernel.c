@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include <multiboot.h>
 #include <memory.h>
 #include <tty.h>
 #include <interrupts.h>
@@ -14,9 +15,15 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
 	isr_init();
 	irq_init(); // Interrupts enabled
 	
-	pmm_init(multiboot_info_ptr);
-
-	// TODO: Pass address of command line to kernel
+	multiboot_info_t *mbi = (multiboot_info_t*)multiboot_info_ptr;
+    // TODO: Pass address of command line to kernel
+	
+    // Check if bit 6 of flags is set for mmap_*
+    if (!(mbi->flags & (1 << 6))) {
+        printf("Memory map not available\n");
+    } else {
+		pmm_init(mbi->mmap_addr, mbi->mmap_length);
+	}
 
 	timer_init(1);
 	keyboard_init();

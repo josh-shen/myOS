@@ -5,13 +5,19 @@
 #include <memory.h>
 #include <multiboot.h>
 
-static void filter(uintptr_t, uintptr_t);
+//static void filter(uintptr_t, uintptr_t);
 static void mark_free(uintptr_t, uintptr_t);
 static uint8_t get_order(uintptr_t);
 
 extern char kernel_start;
 extern char kernel_len;
 
+// Free list linked list structure
+struct partition {
+    struct partition *prev;
+    struct partition *next;
+};
+typedef struct partition partition_t;
 #define MAX_ORDER 11
 static partition_t *free_lists[MAX_ORDER]__attribute__((section(".free_lists")));
 
@@ -29,9 +35,25 @@ static uint8_t get_order(uintptr_t length) {
     return 0;
 }
 
-static void mark_free(uintptr_t base, uintptr_t len) {
-    while (len >= 4096) {
-        uint8_t order = get_order(len);
+static void mark_free(uintptr_t base, uintptr_t length) {
+    if (length == 0) return;
+    // Filter out used regions
+    for (int i = 0; i < NUM_USED_REGIONS; i++) {
+        uintptr_t used_end = used_regions[i][0] + used_regions[i][1];
+        uintptr_t end = base + length;
+
+        if (used_regions[i][0] >= base && used_end <= end) {
+            mark_free(base, used_regions[i][0] - base);
+            mark_free(used_end, end - used_end);
+            return;
+        }
+    }
+
+    vmm_init_kernel_space(base, length);
+    
+    // Add memory to free lists to mark as free
+    while (length >= 4096) {
+        uint8_t order = get_order(length);
         uint32_t partition_size = 2 << (order + 11);
         
         partition_t *partition = (partition_t *)(uintptr_t)(base + 0xC0000000);        
@@ -48,52 +70,28 @@ static void mark_free(uintptr_t base, uintptr_t len) {
         }
 
         base += partition_size;
-        len -= partition_size;
+        length -= partition_size;
     }
 }
 
-static void filter(uintptr_t base, uintptr_t length) {
-    if (length == 0) return;
-
-    for (int i = 0; i < NUM_USED_REGIONS; i++) {
-        uintptr_t used_end = used_regions[i][0] + used_regions[i][1];
-        uintptr_t end = base + length;
-
-        if (used_regions[i][0] >= base && used_end <= end) {
-            filter(base, used_regions[i][0] - base);
-            filter(used_end, end - used_end);
-            return;
-        }
-    }
-    vmm_map(base, length);
-    mark_free(base, length);
-}
-
-void pmm_init(uint32_t multiboot_info_ptr) {    
-    multiboot_info_t *mbi = (multiboot_info_t*)multiboot_info_ptr;
-    
-    // Check if bit 6 of flags is set for mmap_*
-    if (!(mbi->flags & (1 << 6))) {
-        printf("Memory map not available\n");
-        return;
-    }
-
+void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {    
+    // Initialize free lists
     for (uint8_t i = 0; i < MAX_ORDER; i++) {
         free_lists[i] = NULL;
     }
 
     // Pointer to first memory map entry
-    mmap_entry_t *mmap_entry = (mmap_entry_t *)mbi->mmap_addr;
+    mmap_entry_t *mmap_entry = (mmap_entry_t *)mmap_addr;
 
-    while((uintptr_t)mmap_entry < mbi->mmap_addr + mbi->mmap_length) {
+    while((uintptr_t)mmap_entry < mmap_addr + mmap_length) {
         uintptr_t base_addr = ((uint64_t)mmap_entry->base_addr_high << 32) | mmap_entry->base_addr_low;
         uintptr_t length = ((uint64_t)mmap_entry->length_high << 32) | mmap_entry->length_low;
 
         if (mmap_entry->type == 1) {
-            filter(base_addr, length);
+            mark_free(base_addr, length);
         } else if (mmap_entry->type == 3) {
             // TODO: This is ACPI reclimable memory, ACPI data needs to be processed first
-            filter(base_addr, length);
+            mark_free(base_addr, length);
         }
 
         // Add memory map entry size + size field
