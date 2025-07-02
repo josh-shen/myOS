@@ -5,12 +5,19 @@
 #include <memory.h>
 #include <multiboot.h>
 
-//static void filter(uintptr_t, uintptr_t);
 static void mark_free(uintptr_t, uintptr_t);
-static uint8_t get_order(uintptr_t);
+static int get_order(uintptr_t);
+static int split_partition(uint8_t, uint8_t);
 
 extern char kernel_start;
 extern char kernel_len;
+
+// Known used regions 
+#define NUM_USED_REGIONS 2
+static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
+    {(uintptr_t)&kernel_start, (uintptr_t)&kernel_len}, // Kernel
+    {0xB80000, 8000}                                    // VGA memory
+};
 
 // Free list linked list structure
 struct partition {
@@ -18,19 +25,15 @@ struct partition {
     struct partition *next;
 };
 typedef struct partition partition_t;
+
 #define MAX_ORDER 11
 static partition_t *free_lists[MAX_ORDER]__attribute__((section(".free_lists")));
 
-// Known used regions 
-#define NUM_USED_REGIONS 2
-static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
-    {(uintptr_t)&kernel_start, (uintptr_t)&kernel_len}, // Kernel, includes kernel stack
-    {0xB80000, 8000}                                    // VGA memory
-};
+static int get_order(uintptr_t length) {
+    if (length > 2 << (MAX_ORDER + 11)) return -1;
 
-static uint8_t get_order(uintptr_t length) {
     for (int n = MAX_ORDER - 1; n >= 0; n--) {
-        if ((uintptr_t)(2 << (n + 11)) < length) return n;
+        if ((uintptr_t)(2 << (n + 11)) <= length) return n;
     }
     return 0;
 }
@@ -53,7 +56,7 @@ static void mark_free(uintptr_t base, uintptr_t length) {
     
     // Add memory to free lists to mark as free
     while (length >= 4096) {
-        uint8_t order = get_order(length);
+        int order = get_order(length);
         uint32_t partition_size = 2 << (order + 11);
         
         partition_t *partition = (partition_t *)(uintptr_t)(base + 0xC0000000);        
@@ -72,6 +75,38 @@ static void mark_free(uintptr_t base, uintptr_t length) {
         base += partition_size;
         length -= partition_size;
     }
+}
+
+static int split_partition(uint8_t index, uint8_t target) {
+    while (index > target || index >= 0) {
+        partition_t *partition = free_lists[index];
+
+        uint32_t address = (uint32_t)((uintptr_t)partition);
+        uint32_t buddy_address = address + ((2 << (index + 11)) / 2);
+
+        // Remove the partition from the free list
+        free_lists[index] = partition->next;
+        free_lists[index]->prev = NULL;
+
+        // Create buddy partition
+        partition_t *buddy_partition = (partition_t *)(uintptr_t)(buddy_address);
+
+        // Add both buddies to their new free list
+        partition->prev = NULL;
+        partition->next = buddy_partition;
+
+        buddy_partition->prev = partition;
+        buddy_partition->next = NULL;
+
+        free_lists[index--] = partition;
+        
+        if (index == target || index == 0) {
+            return index;
+        }
+
+    }
+
+    return -1;
 }
 
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {    
@@ -101,17 +136,60 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // TODO: Mark areas used by boot modules (mods_*), okther multiboot info needed
     
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
-
-    for (int i = 0; i < MAX_ORDER; i++) {
-        printf("%x\n", free_lists[i]);
-    }
 }
-/*
-uint32_t pmm_alloc() {
 
+int pmm_alloc(uint32_t size) {
+    int order = get_order(size);
+
+    if (order == -1) {
+        printf("Requested size is too large: %d bytes\n", size);
+        return -1; // Size too large
+    }
+
+    if (free_lists[order] != NULL) {
+        partition_t *partition = free_lists[order];
+
+        // Remove the partition from the free list
+        // TODO: handle case where partition is the only one in the list
+        free_lists[order] = partition->next;
+        free_lists[order]->prev = NULL;
+
+        return (uint32_t)((uintptr_t)partition - 0xC0000000); // Return physical address
+    } else {
+        // Search for a larger partition to split
+        for (int i = order + 1; i < MAX_ORDER; i++) {
+            if (free_lists[i] != NULL) {
+                // A larger partition found, split
+                int index = split_partition(i, order);
+
+                if (index == -1) {
+                    printf("Failed to split partition\n");
+                    return -1;
+                }
+
+                partition_t *partition = free_lists[index];
+                free_lists[index] = partition->next;
+                free_lists[index]->prev = NULL;
+
+                return (uint32_t)((uintptr_t)partition - 0xC0000000); // Return physical address
+            }
+        }
+
+        return -1; // No free partition found
+    }
 }
 
 void pmm_free(uint32_t physical_address) {
+    /*
+    return the partition to the free list
 
+    find the order of the partition
+
+    if - the partition's buddy is also free
+        coalesce the two partitions into one
+        continue merging if possible
+        add the partition to the free list
+    else
+        add the partition to the free list
+    */
 }
-*/
