@@ -55,6 +55,12 @@ SECTIONS
 		*(.bootstrap_stack)
 	}
 
+	/* Bitmap */
+	.bitmap ALIGN(4k) : AT (ADDR(.bitmap) - 0xC0000000)
+	{
+		*(.bitmap)
+	}
+
 	/* Free lists array */
 	.free_lists ALIGN(4k) : AT (ADDR(.free_lists) - 0xC0000000)
 	{

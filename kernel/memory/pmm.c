@@ -19,14 +19,28 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
     {0xB80000, 8000}                                    // VGA memory
 };
 
+// Allocation metadata bitmap
+/*
+ * bitmap array holds a struct for each 4 KiB frame of memory
+ * base (not actually needed, since the address can be calculated by index * 4096)
+ * order
+ * allocation status bit
+ */
+#define MAX_FRAMES 32752
+struct buddy {
+    uint8_t order;
+    uint8_t allocated;
+};
+typedef struct buddy buddy_t;
+static buddy_t pmm_bitmap[MAX_FRAMES]__attribute__((section(".bitmap")));
+
 // Free list linked list structure
+#define MAX_ORDER 10
 struct partition {
     struct partition *prev;
     struct partition *next;
 };
 typedef struct partition partition_t;
-
-#define MAX_ORDER 10
 static partition_t *free_lists[MAX_ORDER + 1]__attribute__((section(".free_lists")));
 
 static uint8_t get_order(uintptr_t length) {
@@ -120,7 +134,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     while((uintptr_t)mmap_entry < mmap_addr + mmap_length) {
         uintptr_t base_addr = ((uint64_t)mmap_entry->base_addr_high << 32) | mmap_entry->base_addr_low;
         uintptr_t length = ((uint64_t)mmap_entry->length_high << 32) | mmap_entry->length_low;
-
+        printf("%x\n", length);
         if (mmap_entry->type == 1) {
             mark_free(base_addr, length);
         } else if (mmap_entry->type == 3) {
@@ -184,12 +198,17 @@ int pmm_alloc(uint32_t size) {
 }
 
 void pmm_free(uint32_t physical_address) {
+    //uint8_t order = get_order(size);
+
+    //uint32_t buddy = physical_address ^ (1 << (order + 11));
+
     /*
     return the partition to the free list
 
     find the order of the partition
 
     if - the partition's buddy is also free
+        the buddy's address is calculated by: address XOR (1 << order)
         coalesce the two partitions into one
         continue merging if possible
         add the partition to the free list
