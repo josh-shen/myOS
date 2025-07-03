@@ -29,7 +29,7 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
 #define MAX_FRAMES 32752
 struct buddy {
     uint8_t order;
-    uint8_t allocated;
+    uint8_t allocated; // 0 free, 1 allocated
 };
 typedef struct buddy buddy_t;
 static buddy_t pmm_bitmap[MAX_FRAMES]__attribute__((section(".bitmap")));
@@ -72,7 +72,15 @@ static void mark_free(uintptr_t base, uintptr_t length) {
 
         uint32_t partition_size = 2 << (order + 11);
         
-        partition_t *partition = (partition_t *)(uintptr_t)(base + 0xC0000000);        
+        partition_t *partition = (partition_t *)(uintptr_t)(base + 0xC0000000);
+
+        // Add partition to bitmap
+        int frame_num = base / 4096;
+        struct buddy_t metadata;
+        metadata.order = order;
+        metadata.allocated = 0;
+        pmm_bitmap[frame_num] = metadata;
+
         if (free_lists[order] == NULL) {
             partition->prev = NULL;
             partition->next = NULL;
@@ -102,9 +110,19 @@ static int split_partition(uint8_t index, uint8_t target) {
         if (free_lists[index] != NULL) {
             free_lists[index]->prev = NULL;
         }
+        // Update the order in metadata
+        int frame_num = address / 4096;
+        struct buddy_t metadata = pmm_bitmap[frame_num];
+        metadata.order = index - 1;
 
         // Create buddy partition
         partition_t *buddy_partition = (partition_t *)(uintptr_t)(buddy_address);
+
+        // Set metadata for newly created buddy
+        int buddy_frame_num = buddy_address / 4096;
+        struct buddy_t buddy_metadata = pmm_bitmap[buddy_frame_num];
+        buddy_metadata.order = index;
+        buddy_metadata.allocated = 0;
 
         // Add both buddies to their new free list
         // Free list of the partition's order should always be null since splitting is required
@@ -168,6 +186,12 @@ int pmm_alloc(uint32_t size) {
             free_lists[order]->prev = NULL;
         }
 
+        // Mark partition used in bitmap
+        uint32_t address = (uint32_t)((uintptr_t)partition - 0xC0000000);
+        int frame_num = address / 4096;
+        struct buddy_t metadata = pmm_bitmap[frame_num];
+        metadata.allocated = 1;
+
         return (uint32_t)((uintptr_t)partition - 0xC0000000);
     } else {
         // Search for a larger partition to split
@@ -189,6 +213,12 @@ int pmm_alloc(uint32_t size) {
                     free_lists[order]->prev = NULL;
                 }
 
+                // Mark partition used in bitmap
+                uint32_t address = (uint32_t)((uintptr_t)partition - 0xC0000000);
+                int frame_num = address / 4096;
+                struct buddy_t metadata = pmm_bitmap[frame_num];
+                metadata.allocated = 1;
+
                 return (uint32_t)((uintptr_t)partition - 0xC0000000);
             }
         }
@@ -197,15 +227,39 @@ int pmm_alloc(uint32_t size) {
     }
 }
 
+static void coalesce() {}
+
 void pmm_free(uint32_t physical_address) {
-    //uint8_t order = get_order(size);
+    int frame_num = physical_address / 4096;
+    struct buddy_t metadata = pmm_bitmap[frame_num];
+    uint8_t order = metadata.order;
 
-    //uint32_t buddy = physical_address ^ (1 << (order + 11));
+    uint32_t buddy_address = physical_address ^ (1 << (order + 11));
+    int buddy_frame_num = buddy_address / 4096;
+    struct buddy_t buddy_metadata = pmm_bitmap[buddy_frame_num];
 
+    if (buddy_metadata.allocated == 1) {
+        // buddy is allocated. immediately return the memory to free lists
+        partition_t *partition = (partition_t *)(uintptr_t)(physical_address + 0xC0000000);
+        partition->prev = NULL;
+        partition->next = free_lists[order];
+
+        free_lists[order]->prev = partition;
+        free_lists[order] = partition;
+        // update the metadata
+        metadata.allocated = 0;
+    } else {
+        // buddy is free. merge
+
+        // continue merging if possible
+
+        // return to free lists
+    }
     /*
     return the partition to the free list
 
     find the order of the partition
+    find the buddy address through the bitmap
 
     if - the partition's buddy is also free
         the buddy's address is calculated by: address XOR (1 << order)
