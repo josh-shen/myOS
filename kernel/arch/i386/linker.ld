@@ -55,16 +55,10 @@ SECTIONS
 		*(.bootstrap_stack)
 	}
 
-	/* Bitmap */
-	.bitmap ALIGN(4k) : AT (ADDR(.bitmap) - 0xC0000000)
+	/* Buddy Allocator */
+	.buddy_allocator ALIGN(4k) : AT (ADDR(.buddy_allocator) - 0xC0000000)
 	{
-		*(.bitmap)
-	}
-
-	/* Free lists array */
-	.free_lists ALIGN(4k) : AT (ADDR(.free_lists) - 0xC0000000)
-	{
-		*(.free_lists)
+		*(.buddy_allocator)
 	}
 	
 	kernel_len = . - kernel_start - 0xC0000000;

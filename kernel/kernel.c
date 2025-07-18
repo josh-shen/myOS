@@ -25,6 +25,10 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
 		pmm_init(mbi->mmap_addr, mbi->mmap_length);
 	}
 
+	uint32_t addr = pmm_malloc(4096); 
+	printf("Allocated 4096 bytes at address: %x\n", addr);
+	pmm_free(addr, 4096);
+
 	timer_init(1);
 	keyboard_init();
 

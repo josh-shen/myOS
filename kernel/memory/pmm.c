@@ -5,9 +5,15 @@
 #include <memory.h>
 #include <multiboot.h>
 
-static void mark_free(uintptr_t, uintptr_t);
-static uint8_t get_order(uintptr_t);
-static int split_partition(uint8_t, uint8_t);
+static size_t round_pow2(uint32_t length);
+static uint8_t get_order(uint32_t);
+static uint32_t get_bit_tree_index(uint32_t, uint8_t);
+static uint8_t get_state(uint32_t, uint8_t);
+static void set_state(uint32_t, uint8_t, uint8_t);
+static void append(uint32_t, uint8_t);
+static void free_list_remove(uint32_t, uint8_t);
+static uint8_t split(uint8_t, uint8_t);
+static void mark_free(uint32_t, uint32_t);
 
 extern char kernel_start;
 extern char kernel_len;
@@ -19,42 +25,129 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
     {0xB80000, 8000}                                    // VGA memory
 };
 
-// Allocation metadata bitmap
-/*
- * bitmap array holds a struct for each 4 KiB frame of memory
- * base (not actually needed, since the address can be calculated by index * 4096)
- * order
- * allocation status bit
- */
-#define MAX_FRAMES 32752
-struct buddy {
-    uint8_t order;
-    uint8_t allocated; // 0 free, 1 allocated
-};
-typedef struct buddy buddy_t;
-static buddy_t pmm_bitmap[MAX_FRAMES]__attribute__((section(".bitmap")));
+buddy_t alloc __attribute__((section(".buddy_allocator")));
 
-// Free list linked list structure
-#define MAX_ORDER 10
-struct partition {
-    struct partition *prev;
-    struct partition *next;
-};
-typedef struct partition partition_t;
-static partition_t *free_lists[MAX_ORDER + 1]__attribute__((section(".free_lists")));
+static size_t round_pow2(uint32_t length) {
+    length--;
+    length |= length >> 1;
+    length |= length >> 2;
+    length |= length >> 4;
+    length |= length >> 8;
+    length |= length >> 16;
+    length++;
 
-static uint8_t get_order(uintptr_t length) {
-    for (int n = MAX_ORDER; n >= 0; n--) {
-        if ((uintptr_t)(2 << (n + 11)) <= length) return n;
+    return length;
+}
+
+static uint8_t get_order(uint32_t length) {
+    for (int n = MAX_BLOCK_LOG2; n >= MIN_BLOCK_LOG2; n--) {
+        if ((unsigned)(1 << n) <= length) return n - MIN_BLOCK_LOG2;
     }
     return 0;
 }
 
-static void mark_free(uintptr_t base, uintptr_t length) {
+static uint32_t get_bit_tree_index(uint32_t address, uint8_t order) {
+    uint8_t height = MEM_BLOCK_LOG2 - order - MIN_BLOCK_LOG2;
+    uint32_t offset = (address - alloc.base) / (1 << (MIN_BLOCK_LOG2 + order));
+    uint32_t node_index = (1 << height) - 1 + offset - TRUNCATED_TREE_NODES;
+
+    return node_index;
+}
+
+static uint8_t get_state(uint32_t address, uint8_t order) {
+    uint32_t index = get_bit_tree_index(address, order);
+    uint32_t word_index = index / 32;
+    uint32_t word_offset = index % 32;
+
+    uint8_t state = alloc.bit_tree[word_index] >> word_offset;
+
+    // Apply mask to get the desired bit
+    return state & 1;
+}
+
+static void set_state(uint32_t address, uint8_t order, uint8_t state) {
+    uint32_t index = get_bit_tree_index(address, order);
+    uint32_t word_index = index / 32;
+    uint32_t word_offset = index % 32;
+
+    // Create a mask to only set the bit at the target position
+    uint32_t mask = ~(1 << word_offset);
+
+    alloc.bit_tree[word_index] = (alloc.bit_tree[word_index] & mask) | state << word_offset;
+
+    #ifdef LOGGING
+    printf("Block at order %d marked %d\n", order, state);
+    #endif
+}
+
+static void append(uint32_t address, uint8_t order) {
+    buddy_page_t *p = (buddy_page_t *)(address + 0xC0000000);
+
+    if (alloc.free_lists[order]) alloc.free_lists[order]->prev = p;
+
+    p->prev = NULL;
+    p->next = alloc.free_lists[order];
+
+    alloc.free_lists[order] = p;
+
+    #ifdef LOGGING
+    printf("%x Block added to free list of order %d\n", address, order);
+    #endif
+}
+
+static void free_list_remove(uint32_t address, uint8_t order) {
+    buddy_page_t *p = (buddy_page_t *)(address + 0xC0000000);
+
+    if (p->prev != NULL) p->prev->next = p->next;
+
+    if (alloc.free_lists[order] == p) alloc.free_lists[order] = p->next;
+
+    if (p->next != NULL) p->next->prev = p->prev;
+
+    p->prev = NULL;
+    p->next = NULL;
+
+    #ifdef LOGGING
+    printf("Block removed from free list of order %d\n", order);
+    #endif
+}
+
+static uint8_t split(uint8_t order, uint8_t target) {
+    while (order > target) {
+        buddy_page_t *partition = alloc.free_lists[order];
+
+        uintptr_t address = (uintptr_t)partition - 0xC0000000;
+        uintptr_t buddy_address = ((address - alloc.base) ^ 1 << (order - 1 + MIN_BLOCK_LOG2)) + alloc.base;
+
+        free_list_remove(address, order);
+
+        // Mark the parent block as split in the bit tree
+        set_state(address, order, 1);
+
+        #ifdef LOGGING
+        printf("Block of order %d split\n", order);
+        #endif
+
+        order--;
+
+        // Add both buddies to free lists and mark them as free in the bit tree
+        append(address, order);
+        set_state(address, order, 0);
+
+        append(buddy_address, order);
+        set_state(buddy_address, order, 0);
+
+        if (order == target) return order;
+    }
+    return MAX_ORDER + 1;
+}
+
+static void mark_free(uint32_t base, uint32_t length) {
     if (length == 0) return;
     // Filter out used regions
     for (int i = 0; i < NUM_USED_REGIONS; i++) {
         uintptr_t used_end = used_regions[i][0] + used_regions[i][1];
+
         uintptr_t end = base + length;
 
         if (used_regions[i][0] >= base && used_end <= end) {
@@ -72,78 +165,34 @@ static void mark_free(uintptr_t base, uintptr_t length) {
 
         uint32_t partition_size = 2 << (order + 11);
         
-        partition_t *partition = (partition_t *)(uintptr_t)(base + 0xC0000000);
+        append(base, order);
 
-        // Add partition to bitmap
-        int frame_num = base / 4096;
-        struct buddy_t metadata;
-        metadata.order = order;
-        metadata.allocated = 0;
-        pmm_bitmap[frame_num] = metadata;
-
-        if (free_lists[order] == NULL) {
-            partition->prev = NULL;
-            partition->next = NULL;
-            free_lists[order] = partition;
-        } else {
-            partition->next = free_lists[order];
-            partition->prev = NULL;
-
-            free_lists[order]->prev = partition;
-            free_lists[order] = partition;
-        }
+        set_state(base, order, 0);
 
         base += partition_size;
         length -= partition_size;
     }
 }
 
-static int split_partition(uint8_t index, uint8_t target) {
-    while (index > target) {
-        partition_t *partition = free_lists[index];
+void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
+    alloc.base = 0x0; 
+    alloc.size = 0x8000000; 
 
-        uint32_t address = (uint32_t)((uintptr_t)partition);
-        uint32_t buddy_address = address + ((2 << (index + 11)) / 2);
-
-        // Remove the partition from the free list
-        free_lists[index] = partition->next;
-        if (free_lists[index] != NULL) {
-            free_lists[index]->prev = NULL;
+    // Make sure length of used regions are a power of 2, if not round it up
+    for (int i = 0; i < NUM_USED_REGIONS; i++) {
+        if ((used_regions[i][1] & (used_regions[i][1] - 1)) != 0) {
+            used_regions[i][1] = round_pow2(used_regions[i][1]);
         }
-        // Update the order in metadata
-        int frame_num = address / 4096;
-        struct buddy_t metadata = pmm_bitmap[frame_num];
-        metadata.order = index - 1;
-
-        // Create buddy partition
-        partition_t *buddy_partition = (partition_t *)(uintptr_t)(buddy_address);
-
-        // Set metadata for newly created buddy
-        int buddy_frame_num = buddy_address / 4096;
-        struct buddy_t buddy_metadata = pmm_bitmap[buddy_frame_num];
-        buddy_metadata.order = index;
-        buddy_metadata.allocated = 0;
-
-        // Add both buddies to their new free list
-        // Free list of the partition's order should always be null since splitting is required
-        partition->prev = NULL;
-        partition->next = buddy_partition;
-
-        buddy_partition->prev = partition;
-        buddy_partition->next = NULL;
-
-        free_lists[index--] = partition;
-
-        if (index == target) return index;
     }
 
-    return -1;
-}
+    // Initialize bit tree - all bits initially set to 1, only free blocks will be changed to 0
+    for (int i = 0; i < TREE_WORDS; i++) {
+        alloc.bit_tree[i] = 0xFFFFFFFF;
+    }
 
-void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {    
     // Initialize free lists
-    for (uint8_t i = 0; i <= MAX_ORDER; i++) {
-        free_lists[i] = NULL;
+    for (int i = 0; i <= MAX_ORDER; i++) {
+        alloc.free_lists[i] = NULL;
     }
 
     // Pointer to first memory map entry
@@ -152,7 +201,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     while((uintptr_t)mmap_entry < mmap_addr + mmap_length) {
         uintptr_t base_addr = ((uint64_t)mmap_entry->base_addr_high << 32) | mmap_entry->base_addr_low;
         uintptr_t length = ((uint64_t)mmap_entry->length_high << 32) | mmap_entry->length_low;
-        printf("%x\n", length);
+
         if (mmap_entry->type == 1) {
             mark_free(base_addr, length);
         } else if (mmap_entry->type == 3) {
@@ -163,110 +212,128 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         // Add memory map entry size + size field
         mmap_entry = (mmap_entry_t *)((uintptr_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
     }
-    
+
     // TODO: Mark areas used by boot modules (mods_*), okther multiboot info needed
     
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
 }
 
-int pmm_alloc(uint32_t size) {
-    if (size > 2 << (MAX_ORDER + 11)) {
-        printf("Error: Requested size is too large: %d bytes\n", size);
-        return -1;
+uint32_t pmm_malloc(uint32_t length) {
+    if (length > 1 << MAX_BLOCK_LOG2) {
+        #ifdef ERR_LOGGING
+        printf("Error: Requested size is too large\n");
+        #endif
+        return 0;
     }
 
-    uint8_t order = get_order(size);
+    uint8_t order = get_order(length);
 
-    if (free_lists[order] != NULL) {
-        partition_t *partition = free_lists[order];
+    // Block of the requested order is available - no need to split
+    if (alloc.free_lists[order] != NULL) {
+        buddy_page_t *partition = alloc.free_lists[order];
 
-        // Remove the partition from the free list
-        free_lists[order] = partition->next;
-        if (free_lists[order] != NULL) {
-            free_lists[order]->prev = NULL;
-        }
+        uintptr_t address = (uintptr_t)partition - 0xC0000000;
 
-        // Mark partition used in bitmap
-        uint32_t address = (uint32_t)((uintptr_t)partition - 0xC0000000);
-        int frame_num = address / 4096;
-        struct buddy_t metadata = pmm_bitmap[frame_num];
-        metadata.allocated = 1;
+        free_list_remove(address, order);
 
-        return (uint32_t)((uintptr_t)partition - 0xC0000000);
-    } else {
-        // Search for a larger partition to split
-        for (int i = order + 1; i <= MAX_ORDER; i++) {
-            if (free_lists[i] != NULL) {
-                // A larger partition found, split
-                int index = split_partition(i, order);
+        // Mark block as used in the bit tree
+        set_state(address, order, 1);
 
-                if (index == -1) {
-                    printf("Error: Failed to split partition\n");
-                    return -1;
-                }
+        #ifdef LOGGING
+        printf("%d bytes allocated for a requested size of %d bytes\n\n", 1 << (order + MIN_BLOCK_LOG2), length);
+        #endif
+        return address;
+    }
 
-                partition_t *partition = free_lists[index];
+    // A best fit block was not available - search for a larger block to split
+    for (int i = order + 1; i <= MAX_ORDER; i++) {
+        if (alloc.free_lists[i] != NULL) {
+            // A larger partition found, split
+            uint8_t next_order = split(i, order);
 
-                // Remove the partition from the free list
-                free_lists[index] = partition->next;
-                if (free_lists[order] != NULL) {
-                    free_lists[order]->prev = NULL;
-                }
-
-                // Mark partition used in bitmap
-                uint32_t address = (uint32_t)((uintptr_t)partition - 0xC0000000);
-                int frame_num = address / 4096;
-                struct buddy_t metadata = pmm_bitmap[frame_num];
-                metadata.allocated = 1;
-
-                return (uint32_t)((uintptr_t)partition - 0xC0000000);
+            if (next_order == MAX_ORDER + 1) {
+                #ifdef ERR_LOGGING
+                printf("Error: Failed to split partition\n");
+                #endif
+                return 0;
             }
-        }
 
-        return -1;
+            buddy_page_t *partition = alloc.free_lists[next_order];
+
+            uintptr_t address = (uintptr_t)partition - 0xC0000000;
+
+            free_list_remove(address, next_order);
+
+            // Mark block as used in the bit tree
+            set_state(address, next_order, 1);
+
+            #ifdef LOGGING
+            printf("%d bytes allocated for a requested size of %d bytes\n\n", 1 << (order + MIN_BLOCK_LOG2), length);
+            #endif
+            return address;
+        }
     }
+    #ifdef ERR_LOGGING
+    printf("Error: Not enough memory available to allocate %d bytes\n", length);
+    #endif
+    return 0;
 }
 
-static void coalesce() {}
+void pmm_free(uint32_t address, uint32_t length) {
+    uint8_t order = get_order(length);
 
-void pmm_free(uint32_t physical_address) {
-    int frame_num = physical_address / 4096;
-    struct buddy_t metadata = pmm_bitmap[frame_num];
-    uint8_t order = metadata.order;
+    uint8_t state = get_state(address, order);
 
-    uint32_t buddy_address = physical_address ^ (1 << (order + 11));
-    int buddy_frame_num = buddy_address / 4096;
-    struct buddy_t buddy_metadata = pmm_bitmap[buddy_frame_num];
-
-    if (buddy_metadata.allocated == 1) {
-        // buddy is allocated. immediately return the memory to free lists
-        partition_t *partition = (partition_t *)(uintptr_t)(physical_address + 0xC0000000);
-        partition->prev = NULL;
-        partition->next = free_lists[order];
-
-        free_lists[order]->prev = partition;
-        free_lists[order] = partition;
-        // update the metadata
-        metadata.allocated = 0;
-    } else {
-        // buddy is free. merge
-
-        // continue merging if possible
-
-        // return to free lists
+    if (state == 0) {
+        #ifdef ERR_LOGGING
+        printf("Error: Block at address %d is already free\n", address);
+        return;
+        #endif
     }
-    /*
-    return the partition to the free list
 
-    find the order of the partition
-    find the buddy address through the bitmap
+    uintptr_t buddy_address = ((address - alloc.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc.base;
+    uint8_t buddy_state = get_state(buddy_address, order);
 
-    if - the partition's buddy is also free
-        the buddy's address is calculated by: address XOR (1 << order)
-        coalesce the two partitions into one
-        continue merging if possible
-        add the partition to the free list
-    else
-        add the partition to the free list
-    */
+    // Buddy is either split or allocated - immediately return the block to free lists
+    if (buddy_state == 1) {
+        append(address, order);
+
+        // Mark block as free in the bit tree
+        set_state(address, order, 0);
+
+        #ifdef LOGGING
+        printf("Buddy not available for merging. Block returned to free list of order %d\n\n", order);
+        #endif
+        return;
+    }
+
+    // Buddy is free - merge
+    while (order < MAX_ORDER) {
+        free_list_remove(buddy_address, order);
+
+        // Mark first buddy as free in the bit tree
+        set_state(address, order, 0);
+
+        #ifdef LOGGING
+        printf("Buddies of order %d merged\n", order);
+        #endif
+
+        order++;
+
+        // Mark the parent block as free in the bit tree
+        set_state(address, order, 0);
+
+        // Get state of buddy of the parent block
+        buddy_address = ((address - alloc.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc.base;
+        buddy_state = get_state(buddy_address, order);
+
+        if (buddy_state != 0) break;
+    }
+
+    // Add the final, merged block back to free lists
+    append(address, order);
+
+    #ifdef LOGGING
+    printf("Cannot merge further. Block returned to free list of order %d\n\n", order);
+    #endif
 }
