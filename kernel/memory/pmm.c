@@ -5,12 +5,12 @@
 #include <memory.h>
 #include <multiboot.h>
 
-static size_t round_pow2(uint32_t length);
+static uint32_t round_pow2(uint32_t length);
 static uint8_t get_order(uint32_t);
 static uint32_t get_bit_tree_index(uint32_t, uint8_t);
 static uint8_t get_state(uint32_t, uint8_t);
 static void set_state(uint32_t, uint8_t, uint8_t);
-static void append(uint32_t, uint8_t);
+static void free_list_append(uint32_t, uint8_t);
 static void free_list_remove(uint32_t, uint8_t);
 static uint8_t split(uint8_t, uint8_t);
 static void mark_free(uint32_t, uint32_t);
@@ -27,7 +27,7 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
 
 buddy_t alloc __attribute__((section(".buddy_allocator")));
 
-static size_t round_pow2(uint32_t length) {
+static uint32_t round_pow2(uint32_t length) {
     length--;
     length |= length >> 1;
     length |= length >> 2;
@@ -74,13 +74,9 @@ static void set_state(uint32_t address, uint8_t order, uint8_t state) {
     uint32_t mask = ~(1 << word_offset);
 
     alloc.bit_tree[word_index] = (alloc.bit_tree[word_index] & mask) | state << word_offset;
-
-    #ifdef LOGGING
-    printf("Block at order %d marked %d\n", order, state);
-    #endif
 }
 
-static void append(uint32_t address, uint8_t order) {
+static void free_list_append(uint32_t address, uint8_t order) {
     buddy_page_t *p = (buddy_page_t *)(address + 0xC0000000);
 
     if (alloc.free_lists[order]) alloc.free_lists[order]->prev = p;
@@ -89,10 +85,6 @@ static void append(uint32_t address, uint8_t order) {
     p->next = alloc.free_lists[order];
 
     alloc.free_lists[order] = p;
-
-    #ifdef LOGGING
-    printf("%x Block added to free list of order %d\n", address, order);
-    #endif
 }
 
 static void free_list_remove(uint32_t address, uint8_t order) {
@@ -106,35 +98,27 @@ static void free_list_remove(uint32_t address, uint8_t order) {
 
     p->prev = NULL;
     p->next = NULL;
-
-    #ifdef LOGGING
-    printf("Block removed from free list of order %d\n", order);
-    #endif
 }
 
 static uint8_t split(uint8_t order, uint8_t target) {
     while (order > target) {
         buddy_page_t *partition = alloc.free_lists[order];
 
-        uintptr_t address = (uintptr_t)partition - 0xC0000000;
-        uintptr_t buddy_address = ((address - alloc.base) ^ 1 << (order - 1 + MIN_BLOCK_LOG2)) + alloc.base;
+        uint32_t address = (uint32_t)partition - 0xC0000000;
+        uint32_t buddy_address = ((address - alloc.base) ^ 1 << (order - 1 + MIN_BLOCK_LOG2)) + alloc.base;
 
         free_list_remove(address, order);
 
         // Mark the parent block as split in the bit tree
         set_state(address, order, 1);
 
-        #ifdef LOGGING
-        printf("Block of order %d split\n", order);
-        #endif
-
         order--;
 
         // Add both buddies to free lists and mark them as free in the bit tree
-        append(address, order);
+        free_list_append(address, order);
         set_state(address, order, 0);
 
-        append(buddy_address, order);
+        free_list_append(buddy_address, order);
         set_state(buddy_address, order, 0);
 
         if (order == target) return order;
@@ -146,9 +130,9 @@ static void mark_free(uint32_t base, uint32_t length) {
     if (length == 0) return;
     // Filter out used regions
     for (int i = 0; i < NUM_USED_REGIONS; i++) {
-        uintptr_t used_end = used_regions[i][0] + used_regions[i][1];
+        uint32_t used_end = used_regions[i][0] + used_regions[i][1];
 
-        uintptr_t end = base + length;
+        uint32_t end = base + length;
 
         if (used_regions[i][0] >= base && used_end <= end) {
             mark_free(base, used_regions[i][0] - base);
@@ -157,7 +141,7 @@ static void mark_free(uint32_t base, uint32_t length) {
         }
     }
 
-    vmm_init_kernel_space(base, length);
+    vmm_map_higher_half(base, length);
     
     // Add memory to free lists to mark as free
     while (length >= 4096) {
@@ -165,7 +149,7 @@ static void mark_free(uint32_t base, uint32_t length) {
 
         uint32_t partition_size = 2 << (order + 11);
         
-        append(base, order);
+        free_list_append(base, order);
 
         set_state(base, order, 0);
 
@@ -198,7 +182,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // Pointer to first memory map entry
     mmap_entry_t *mmap_entry = (mmap_entry_t *)mmap_addr;
 
-    while((uintptr_t)mmap_entry < mmap_addr + mmap_length) {
+    while((uint32_t)mmap_entry < mmap_addr + mmap_length) {
         uintptr_t base_addr = ((uint64_t)mmap_entry->base_addr_high << 32) | mmap_entry->base_addr_low;
         uintptr_t length = ((uint64_t)mmap_entry->length_high << 32) | mmap_entry->length_low;
 
@@ -210,7 +194,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         }
 
         // Add memory map entry size + size field
-        mmap_entry = (mmap_entry_t *)((uintptr_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
+        mmap_entry = (mmap_entry_t *)((uint32_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
     }
 
     // TODO: Mark areas used by boot modules (mods_*), okther multiboot info needed
@@ -220,9 +204,6 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
 
 uint32_t pmm_malloc(uint32_t length) {
     if (length > 1 << MAX_BLOCK_LOG2) {
-        #ifdef ERR_LOGGING
-        printf("Error: Requested size is too large\n");
-        #endif
         return 0;
     }
 
@@ -232,16 +213,13 @@ uint32_t pmm_malloc(uint32_t length) {
     if (alloc.free_lists[order] != NULL) {
         buddy_page_t *partition = alloc.free_lists[order];
 
-        uintptr_t address = (uintptr_t)partition - 0xC0000000;
+        uint32_t address = (uint32_t)partition - 0xC0000000;
 
         free_list_remove(address, order);
 
         // Mark block as used in the bit tree
         set_state(address, order, 1);
 
-        #ifdef LOGGING
-        printf("%d bytes allocated for a requested size of %d bytes\n\n", 1 << (order + MIN_BLOCK_LOG2), length);
-        #endif
         return address;
     }
 
@@ -252,30 +230,22 @@ uint32_t pmm_malloc(uint32_t length) {
             uint8_t next_order = split(i, order);
 
             if (next_order == MAX_ORDER + 1) {
-                #ifdef ERR_LOGGING
-                printf("Error: Failed to split partition\n");
-                #endif
                 return 0;
             }
 
             buddy_page_t *partition = alloc.free_lists[next_order];
 
-            uintptr_t address = (uintptr_t)partition - 0xC0000000;
+            uint32_t address = (uint32_t)partition - 0xC0000000;
 
             free_list_remove(address, next_order);
 
             // Mark block as used in the bit tree
             set_state(address, next_order, 1);
 
-            #ifdef LOGGING
-            printf("%d bytes allocated for a requested size of %d bytes\n\n", 1 << (order + MIN_BLOCK_LOG2), length);
-            #endif
             return address;
         }
     }
-    #ifdef ERR_LOGGING
-    printf("Error: Not enough memory available to allocate %d bytes\n", length);
-    #endif
+
     return 0;
 }
 
@@ -285,25 +255,19 @@ void pmm_free(uint32_t address, uint32_t length) {
     uint8_t state = get_state(address, order);
 
     if (state == 0) {
-        #ifdef ERR_LOGGING
-        printf("Error: Block at address %d is already free\n", address);
         return;
-        #endif
     }
 
-    uintptr_t buddy_address = ((address - alloc.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc.base;
+    uint32_t buddy_address = ((address - alloc.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc.base;
     uint8_t buddy_state = get_state(buddy_address, order);
 
     // Buddy is either split or allocated - immediately return the block to free lists
     if (buddy_state == 1) {
-        append(address, order);
+        free_list_append(address, order);
 
         // Mark block as free in the bit tree
         set_state(address, order, 0);
 
-        #ifdef LOGGING
-        printf("Buddy not available for merging. Block returned to free list of order %d\n\n", order);
-        #endif
         return;
     }
 
@@ -313,10 +277,6 @@ void pmm_free(uint32_t address, uint32_t length) {
 
         // Mark first buddy as free in the bit tree
         set_state(address, order, 0);
-
-        #ifdef LOGGING
-        printf("Buddies of order %d merged\n", order);
-        #endif
 
         order++;
 
@@ -331,9 +291,5 @@ void pmm_free(uint32_t address, uint32_t length) {
     }
 
     // Add the final, merged block back to free lists
-    append(address, order);
-
-    #ifdef LOGGING
-    printf("Cannot merge further. Block returned to free list of order %d\n\n", order);
-    #endif
+    free_list_append(address, order);
 }
