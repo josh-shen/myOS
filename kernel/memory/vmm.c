@@ -2,41 +2,202 @@
 
 #include <memory.h>
 
-static int next_free_boot_pt_index = 3;
+static uint32_t get_current_pd();
+static uint32_t create_new_pt();
+static void split(vm_area_t *, uint32_t);
+static void merge(vm_area_t *);
+static uint32_t get_vm_area(uint32_t);
 
-// 32 page tables required to map 128 MiB of memory
-uint32_t boot_page_directory[1024]__attribute__((section(".page_tables")))__attribute__((aligned(4096)));
-uint32_t boot_page_tables[32][1024]__attribute__((section(".page_tables")))__attribute((aligned(4096)));
+page_directory_t boot_page_directory __attribute__((section(".page_tables")))__attribute__((aligned(4096)));
+// Four page tables used for kernel mapping during boot
+page_table_t boot_page_tables[4] __attribute__((section(".page_tables")))__attribute__((aligned(4096)));
 
-void vmm_init_kernel_space(uint32_t base, uint32_t len) {
-    while (len >= 4096) {
-        uint32_t virtual_address = base + 0xC0000000;
+// Kernel vm area linked list
+vm_area_t *head = NULL;
 
-        uint32_t pde_index = (virtual_address >> 22) & 0x3FF;
-        uint32_t pte_index = (virtual_address >> 12) & 0x3FF;
-        uint32_t relative_pte = pde_index - 768;
+static uint32_t get_current_pd() {
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 
-        uint32_t pde = boot_page_directory[pde_index];
-    
-        if (!(pde & 0x1)) {
-            if (next_free_boot_pt_index++ > 31) return;
-            // TODO: implement actual error handling for running out of space      
+    return cr3;
+}
 
-            uint32_t *new_pt_virtual = boot_page_tables[next_free_boot_pt_index];
+static uint32_t create_new_pt() {
+    uint32_t pt_addr = pmm_malloc(4096); // 4 KiB enough for one page table 
 
-            for (int i = 0; i < 1024; i++) {
-                new_pt_virtual[i] = 0;
-            }
+    page_table_t *pt = (page_table_t *)(pt_addr + 0xC0000000);
 
-            uint32_t new_pt_phys_addr = (uint32_t)new_pt_virtual - 0xC0000000;
-      
-            boot_page_directory[pde_index] = new_pt_phys_addr + 0x003;
+    for (int i = 0; i < 1024; i++) {
+        pt->entries[i] = 0;
+    }
+
+    return pt_addr;
+}
+
+static void split(vm_area_t *node, uint32_t length) {
+    uint32_t addr = kmalloc(sizeof(vm_area_t));
+
+    // Create new node of size (original length - length)
+    vm_area_t *split = (vm_area_t *)addr;
+    split->addr = node->addr + length;
+    split->size = node->size - length;
+    split->used = 0;
+    split->next = node->next;
+
+    node->size = length;
+    node->next = split;
+}
+
+static void merge(vm_area_t *node) {
+    vm_area_t *next = node->next;
+
+    while (next != NULL) {
+        if (next->used == 1) {
+            node = node->next;
+            return;
         }
 
-        uint32_t *target_pt_array = boot_page_tables[relative_pte];
-        target_pt_array[pte_index] = base + 0x003;
+        node->size = node->size + next->size;
+        node->next = next->next;
 
-        base += 4096;
-        len -= 4096;
+        kfree((void *)next); // TODO: is this correct syntax?
     }
+}
+
+static uint32_t get_vm_area(uint32_t length) {
+    vm_area_t *node = head;
+
+    while (node != NULL) {
+        if (node->used == 1 || node->size < length) {
+            node = node->next;
+            continue;
+        }
+
+        // Split if a larger than needed node is found
+        if (node->size > length) split(node, length);
+        
+        node->used = 1;
+
+        return node->addr;
+    }
+}
+
+void vmm_init(uint32_t virt_addr_base) {
+    uint32_t length = 0xFFFFFFFF - virt_addr_base;
+
+    // Allocate a page for inital linked list nodes
+    uint32_t addr = pmm_malloc(4096);
+
+    // Create two nodes for 4 KiB each. These nodes will be used to initialize the slab allocator
+    for (int i = 0; i < 2; i++) {
+        vm_area_t *node = (vm_area_t *)(addr + 0xC0000000);
+        node->addr = virt_addr_base;
+        node->size = 4096;
+        node->used = 0;
+        node->next = NULL;
+
+        if (head == NULL) {
+            head = node;
+            continue;
+        }
+
+        vm_area_t *curr = head;
+        while (curr->next != NULL) {
+            curr = curr->next;
+        }
+        curr->next = node;
+        
+        addr += sizeof(vm_area_t);
+        virt_addr_base += 4096;
+        length -= 4096;
+    }
+
+    vm_area_t *node = (vm_area_t *)(addr + 0xC0000000);
+    node->addr = virt_addr_base;
+    node->size = length;
+    node->used = 0;
+    node->next = head;
+    
+    vm_area_t *curr = head;
+    while (curr->next != NULL) {
+        curr = curr->next;
+    }
+    curr->next = node;
+}
+
+void vmm_map(uint32_t virt_addr, uint32_t phys_addr, uint32_t flags) {
+    uint32_t pde_index = (virt_addr >> 22) & 0x3FF;
+    uint32_t pte_index = (virt_addr >> 12) & 0x3FF;
+
+    page_directory_t *pd = (page_directory_t *)get_current_pd();
+    uint32_t pde = pd->entries[pde_index];
+
+    // Check if page table exists
+    if (!(pde & PDE_PRESENT)) {
+        pd->entries[pde_index] = create_new_pt() | flags;
+    }
+
+    uint32_t pt_phys_addr = pde & 0xFFFFF000;
+    page_table_t *pt = (page_table_t *)(pt_phys_addr + 0xC0000000);
+
+    // Check if address is already mapped
+    if (!(pt->entries[pte_index] & PTE_PRESENT)) {
+        pt->entries[pte_index] = phys_addr | flags;
+    }
+}
+
+uint32_t vmm_unmap(uint32_t virt_addr) {
+    uint32_t pde_index = (virt_addr >> 22) & 0x3FF;
+    uint32_t pte_index = (virt_addr >> 12) & 0x3FF;
+
+    page_directory_t *pd = (page_directory_t *)get_current_pd();
+    uint32_t pde = pd->entries[pde_index];
+
+    uint32_t pt_phys_addr = pde & PDE_FRAME;
+    page_table_t *pt = (page_table_t *)(pt_phys_addr + 0xC0000000);
+
+    uint32_t phys_addr = pt->entries[pte_index] & PTE_FRAME;
+    pt->entries[pte_index] = 0;
+
+    return phys_addr;
+}
+
+uint32_t vmm_malloc(uint32_t length) {
+    uint32_t virt_addr = get_vmm_area(length);
+
+    uint32_t curr_virt_addr = virt_addr;
+
+    while (length >= 4096) {
+        uint32_t phys_addr = pmm_malloc(4096);
+
+        vmm_map(curr_virt_addr, phys_addr, 0x3);
+
+        curr_virt_addr += 4096;
+        length -= 4096;
+    }    
+    
+    return virt_addr;
+}
+
+void vmm_free(uint32_t virt_addr, uint32_t length) {
+    vm_area_t *node = head;
+
+    while (node != NULL) {
+        if (node->addr == virt_addr) {
+            node->used == 0;
+            merge(node);
+        }
+
+        node = node->next;
+    }
+
+    while (length >= 4096) {
+        uint32_t phys_addr = vmm_unmap(virt_addr);
+
+        pmm_free(phys_addr, 4096);
+
+        virt_addr += 4096;
+        length -= 4096;
+    }
+    
 }

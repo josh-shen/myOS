@@ -21,16 +21,20 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
     // Check if bit 6 of flags is set for mmap_*
     if (!(mbi->flags & (1 << 6))) {
         printf("Memory map not available\n");
-    } else {
-		pmm_init(mbi->mmap_addr, mbi->mmap_length);
-	}
+		return;
+    } 
 
-	uint32_t addr = pmm_malloc(4096); 
-	printf("Allocated 4096 bytes at address: %x\n", addr);
-	pmm_free(addr, 4096);
+	// Iinitialize physical memory manager
+	uint32_t virt_addr_start = pmm_init(mbi->mmap_addr, mbi->mmap_length);
 
-	timer_init(1);
-	keyboard_init();
+	// Initialize virtual memory manager
+	vmm_init(virt_addr_start);
+
+	// Initialize kernel heap
+	kmem_init();
+
+	//timer_init(1);
+	//keyboard_init();
 
 	//printf("Hello, kernel World!\n");
 	//printf("%d %d %x\n", 0, 123456789, 1234);

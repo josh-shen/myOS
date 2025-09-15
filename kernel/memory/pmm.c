@@ -5,7 +5,7 @@
 #include <memory.h>
 #include <multiboot.h>
 
-static uint32_t round_pow2(uint32_t length);
+static uint32_t round_pow2(uint32_t);
 static uint8_t get_order(uint32_t);
 static uint32_t get_bit_tree_index(uint32_t, uint8_t);
 static uint8_t get_state(uint32_t, uint8_t);
@@ -77,34 +77,34 @@ static void set_state(uint32_t address, uint8_t order, uint8_t state) {
 }
 
 static void free_list_append(uint32_t address, uint8_t order) {
-    buddy_page_t *p = (buddy_page_t *)(address + 0xC0000000);
+    buddy_block_t *block = (buddy_block_t *)(address + 0xC0000000);
 
-    if (alloc.free_lists[order]) alloc.free_lists[order]->prev = p;
+    if (alloc.free_lists[order]) alloc.free_lists[order]->prev = block;
 
-    p->prev = NULL;
-    p->next = alloc.free_lists[order];
+    block->prev = NULL;
+    block->next = alloc.free_lists[order];
 
-    alloc.free_lists[order] = p;
+    alloc.free_lists[order] = block;
 }
 
 static void free_list_remove(uint32_t address, uint8_t order) {
-    buddy_page_t *p = (buddy_page_t *)(address + 0xC0000000);
+    buddy_block_t *block = (buddy_block_t *)(address + 0xC0000000);
 
-    if (p->prev != NULL) p->prev->next = p->next;
+    if (block->prev != NULL) block->prev->next = block->next;
 
-    if (alloc.free_lists[order] == p) alloc.free_lists[order] = p->next;
+    if (alloc.free_lists[order] == block) alloc.free_lists[order] = block->next;
 
-    if (p->next != NULL) p->next->prev = p->prev;
+    if (block->next != NULL) block->next->prev = block->prev;
 
-    p->prev = NULL;
-    p->next = NULL;
+    block->prev = NULL;
+    block->next = NULL;
 }
 
 static uint8_t split(uint8_t order, uint8_t target) {
     while (order > target) {
-        buddy_page_t *partition = alloc.free_lists[order];
+        buddy_block_t *block = alloc.free_lists[order];
 
-        uint32_t address = (uint32_t)partition - 0xC0000000;
+        uint32_t address = (uint32_t)block - 0xC0000000;
         uint32_t buddy_address = ((address - alloc.base) ^ 1 << (order - 1 + MIN_BLOCK_LOG2)) + alloc.base;
 
         free_list_remove(address, order);
@@ -141,24 +141,33 @@ static void mark_free(uint32_t base, uint32_t length) {
         }
     }
 
-    vmm_map_higher_half(base, length);
+    // Create linear mappings of addresses to address + 0xC0000000
+    uint32_t addr = base;
+    uint32_t unmapped_length = length;
+    
+    while (unmapped_length >= 4096) {
+        vmm_map(addr + 0xC0000000, addr, 0x3);
+
+        addr += 4096;
+        unmapped_length -= 4096; 
+    }
     
     // Add memory to free lists to mark as free
     while (length >= 4096) {
         uint8_t order = get_order(length);
 
-        uint32_t partition_size = 2 << (order + 11);
+        uint32_t block_size = 2 << (order + 11);
         
         free_list_append(base, order);
 
         set_state(base, order, 0);
 
-        base += partition_size;
-        length -= partition_size;
+        base += block_size;
+        length -= block_size;
     }
 }
 
-void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
+uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     alloc.base = 0x0; 
     alloc.size = 0x8000000; 
 
@@ -182,15 +191,19 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // Pointer to first memory map entry
     mmap_entry_t *mmap_entry = (mmap_entry_t *)mmap_addr;
 
+    uint32_t addr_end;
+
     while((uint32_t)mmap_entry < mmap_addr + mmap_length) {
         uintptr_t base_addr = ((uint64_t)mmap_entry->base_addr_high << 32) | mmap_entry->base_addr_low;
         uintptr_t length = ((uint64_t)mmap_entry->length_high << 32) | mmap_entry->length_low;
 
         if (mmap_entry->type == 1) {
             mark_free(base_addr, length);
+            addr_end = base_addr + length;
         } else if (mmap_entry->type == 3) {
             // TODO: This is ACPI reclimable memory, ACPI data needs to be processed first
             mark_free(base_addr, length);
+            addr_end = base_addr + length;
         }
 
         // Add memory map entry size + size field
@@ -200,6 +213,9 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // TODO: Mark areas used by boot modules (mods_*), okther multiboot info needed
     
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
+    
+    // Return last used virtual address used for linear mappings with a one page gap
+    return addr_end + 0xC0001000;
 }
 
 uint32_t pmm_malloc(uint32_t length) {
@@ -211,9 +227,9 @@ uint32_t pmm_malloc(uint32_t length) {
 
     // Block of the requested order is available - no need to split
     if (alloc.free_lists[order] != NULL) {
-        buddy_page_t *partition = alloc.free_lists[order];
+        buddy_block_t *block_size = alloc.free_lists[order];
 
-        uint32_t address = (uint32_t)partition - 0xC0000000;
+        uint32_t address = (uint32_t)block_size - 0xC0000000;
 
         free_list_remove(address, order);
 
@@ -229,13 +245,11 @@ uint32_t pmm_malloc(uint32_t length) {
             // A larger partition found, split
             uint8_t next_order = split(i, order);
 
-            if (next_order == MAX_ORDER + 1) {
-                return 0;
-            }
+            if (next_order == MAX_ORDER + 1) return 0;
 
-            buddy_page_t *partition = alloc.free_lists[next_order];
+            buddy_block_t *block_size = alloc.free_lists[next_order];
 
-            uint32_t address = (uint32_t)partition - 0xC0000000;
+            uint32_t address = (uint32_t)block_size - 0xC0000000;
 
             free_list_remove(address, next_order);
 
