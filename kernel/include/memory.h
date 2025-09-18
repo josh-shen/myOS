@@ -96,7 +96,6 @@ typedef struct slab slab_t;
 
 struct cache {
     struct cache *next;
-    struct cache *prev;
     uint32_t objsize;
     uint32_t num; // number of objects per slab
     // flags, spinlock
@@ -106,5 +105,9 @@ struct cache {
     slab_t *slabs_empty;
 };
 typedef struct cache cache_t;
+
+void kmem_init();
+uint32_t kmalloc(uint32_t);
+void kfree(void *);
 
 #endif

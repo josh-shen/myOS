@@ -23,7 +23,7 @@ static uint32_t get_current_pd() {
 }
 
 static uint32_t create_new_pt() {
-    uint32_t pt_addr = pmm_malloc(4096); // 4 KiB enough for one page table 
+    uint32_t pt_addr = pmm_malloc(4096); // One page table fits in 4 KiB
 
     page_table_t *pt = (page_table_t *)(pt_addr + 0xC0000000);
 
@@ -88,41 +88,27 @@ void vmm_init(uint32_t virt_addr_base) {
     // Allocate a page for inital linked list nodes
     uint32_t addr = pmm_malloc(4096);
 
-    // Create two nodes for 4 KiB each. These nodes will be used to initialize the slab allocator
-    for (int i = 0; i < 2; i++) {
-        vm_area_t *node = (vm_area_t *)(addr + 0xC0000000);
-        node->addr = virt_addr_base;
-        node->size = 4096;
-        node->used = 0;
-        node->next = NULL;
+    // Create one 4 KiB node - this will be used to initialize the slab allocator
+    vm_area_t *page_node = (vm_area_t *)(addr + 0xC0000000);
+    page_node->addr = virt_addr_base;
+    page_node->size = 4096;
+    page_node->used = 0;
+    page_node->next = NULL;
 
-        if (head == NULL) {
-            head = node;
-            continue;
-        }
+    head = page_node;
+    
+    addr += sizeof(vm_area_t);
+    virt_addr_base += 4096;
+    length -= 4096;
 
-        vm_area_t *curr = head;
-        while (curr->next != NULL) {
-            curr = curr->next;
-        }
-        curr->next = node;
-        
-        addr += sizeof(vm_area_t);
-        virt_addr_base += 4096;
-        length -= 4096;
-    }
-
+    // Create a node for the rest of the virtual memory area
     vm_area_t *node = (vm_area_t *)(addr + 0xC0000000);
     node->addr = virt_addr_base;
     node->size = length;
     node->used = 0;
     node->next = head;
     
-    vm_area_t *curr = head;
-    while (curr->next != NULL) {
-        curr = curr->next;
-    }
-    curr->next = node;
+    head->next = node;
 }
 
 void vmm_map(uint32_t virt_addr, uint32_t phys_addr, uint32_t flags) {
@@ -163,7 +149,7 @@ uint32_t vmm_unmap(uint32_t virt_addr) {
 }
 
 uint32_t vmm_malloc(uint32_t length) {
-    uint32_t virt_addr = get_vmm_area(length);
+    uint32_t virt_addr = get_vm_area(length);
 
     uint32_t curr_virt_addr = virt_addr;
 

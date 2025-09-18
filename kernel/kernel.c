@@ -31,12 +31,12 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
 	vmm_init(virt_addr_start);
 
 	// Initialize kernel heap
-	kmem_init();
+	//kmem_init();
 
 	//timer_init(1);
 	//keyboard_init();
 
-	//printf("Hello, kernel World!\n");
+	printf("Hello, kernel World!\n");
 	//printf("%d %d %x\n", 0, 123456789, 1234);
 	//asm volatile ("int $0x3");
 }
