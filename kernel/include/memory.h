@@ -31,7 +31,7 @@ struct buddy {
 typedef struct buddy buddy_t;
 
 uint32_t pmm_init(uint32_t, uint32_t);
-uint32_t pmm_malloc(uint32_t);
+uint32_t *pmm_malloc(uint32_t);
 void pmm_free(uint32_t, uint32_t);
 
 /* Virtual memory manager */
@@ -79,7 +79,7 @@ struct vm_area {
 void vmm_init(uint32_t);
 void vmm_map(uint32_t, uint32_t, uint32_t);
 uint32_t vmm_unmap(uint32_t);
-uint32_t vmm_malloc(uint32_t);
+uint32_t *vmm_malloc(uint32_t);
 void vmm_free(uint32_t, uint32_t);
 
 /* Kernel memory, slab allocator */
@@ -107,7 +107,7 @@ struct cache {
 typedef struct cache cache_t;
 
 void kmem_init();
-uint32_t kmalloc(uint32_t);
-void kfree(void *);
+void *kmalloc(uint32_t);
+void kfree(void *, uint32_t);
 
 #endif

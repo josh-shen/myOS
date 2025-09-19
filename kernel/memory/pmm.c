@@ -128,6 +128,7 @@ static uint8_t split(uint8_t order, uint8_t target) {
 
 static void mark_free(uint32_t base, uint32_t length) {
     if (length == 0) return;
+
     // Filter out used regions
     for (int i = 0; i < NUM_USED_REGIONS; i++) {
         uint32_t used_end = used_regions[i][0] + used_regions[i][1];
@@ -137,6 +138,7 @@ static void mark_free(uint32_t base, uint32_t length) {
         if (used_regions[i][0] >= base && used_end <= end) {
             mark_free(base, used_regions[i][0] - base);
             mark_free(used_end, end - used_end);
+
             return;
         }
     }
@@ -169,9 +171,9 @@ static void mark_free(uint32_t base, uint32_t length) {
 
 uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     alloc.base = 0x0; 
-    alloc.size = 0x8000000; 
+    alloc.size = 0x8000000; // 128 MiB
 
-    // Make sure length of used regions are a power of 2, if not round it up
+    // Ensure regions are a power of 2, if not round it up
     for (int i = 0; i < NUM_USED_REGIONS; i++) {
         if ((used_regions[i][1] & (used_regions[i][1] - 1)) != 0) {
             used_regions[i][1] = round_pow2(used_regions[i][1]);
@@ -191,7 +193,7 @@ uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // Pointer to first memory map entry
     mmap_entry_t *mmap_entry = (mmap_entry_t *)mmap_addr;
 
-    uint32_t addr_end;
+    uint32_t addr_end = 0;
 
     while((uint32_t)mmap_entry < mmap_addr + mmap_length) {
         uintptr_t base_addr = ((uint64_t)mmap_entry->base_addr_high << 32) | mmap_entry->base_addr_low;
@@ -218,10 +220,8 @@ uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     return addr_end + 0xC0001000;
 }
 
-uint32_t pmm_malloc(uint32_t length) {
-    if (length > 1 << MAX_BLOCK_LOG2) {
-        return 0;
-    }
+uint32_t *pmm_malloc(uint32_t length) {
+    if (length > 1 << MAX_BLOCK_LOG2) return NULL;
 
     uint8_t order = get_order(length);
 
@@ -236,7 +236,7 @@ uint32_t pmm_malloc(uint32_t length) {
         // Mark block as used in the bit tree
         set_state(address, order, 1);
 
-        return address;
+        return (uint32_t *)address;
     }
 
     // A best fit block was not available - search for a larger block to split
@@ -245,7 +245,7 @@ uint32_t pmm_malloc(uint32_t length) {
             // A larger partition found, split
             uint8_t next_order = split(i, order);
 
-            if (next_order == MAX_ORDER + 1) return 0;
+            if (next_order == MAX_ORDER + 1) return NULL;
 
             buddy_block_t *block_size = alloc.free_lists[next_order];
 
@@ -256,11 +256,11 @@ uint32_t pmm_malloc(uint32_t length) {
             // Mark block as used in the bit tree
             set_state(address, next_order, 1);
 
-            return address;
+            return (uint32_t *)address;
         }
     }
 
-    return 0;
+    return NULL;
 }
 
 void pmm_free(uint32_t address, uint32_t length) {
@@ -268,9 +268,7 @@ void pmm_free(uint32_t address, uint32_t length) {
 
     uint8_t state = get_state(address, order);
 
-    if (state == 0) {
-        return;
-    }
+    if (state == 0) return; // TODO: handle error if the state is 0. This probably means the length is not correct
 
     uint32_t buddy_address = ((address - alloc.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc.base;
     uint8_t buddy_state = get_state(buddy_address, order);
