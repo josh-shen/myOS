@@ -47,8 +47,6 @@ static object_t *object_alloc(cache_t *cache) {
         }
 
         return obj;
-    } else {
-        // no available slabs - grow cache, then alloc
     }
 }
 
