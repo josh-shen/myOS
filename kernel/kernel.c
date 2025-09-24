@@ -15,7 +15,7 @@ void kernel_main(uint32_t magic, uint32_t multiboot_info_ptr) {
 	isr_init();
 	irq_init(); // Interrupts enabled
 	
-	multiboot_info_t *mbi = (multiboot_info_t*)multiboot_info_ptr;
+	multiboot_info_t *mbi = (multiboot_info_t *)multiboot_info_ptr;
     // TODO: Pass address of command line to kernel
 	
     // Check if bit 6 of flags is set for mmap_*

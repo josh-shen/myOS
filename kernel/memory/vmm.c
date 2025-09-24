@@ -154,7 +154,7 @@ uint32_t vmm_unmap(uint32_t virt_addr) {
 }
 
 uint32_t *vmm_malloc(uint32_t length) {
-    uint32_t *virt_addr = get_vm_area(length); // TODO: error handling if no free vm area is available
+    uint32_t *virt_addr = get_vm_area(length);
 
     if (virt_addr == NULL) { /* TODO: handle out of virtual memory */ }
 

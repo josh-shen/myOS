@@ -165,7 +165,7 @@ void *kmalloc(uint32_t size) {
     cache_t *curr = cache_chain;
 
     while (curr != NULL) {
-        if (curr->objsize >= size) return object_alloc(curr); // May return NULL
+        if (curr->objsize >= size) return object_alloc(curr);
 
         curr = curr->next;
     }
