@@ -25,7 +25,7 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
     {0xB80000, 8000}                                    // VGA memory
 };
 
-buddy_t alloc __attribute__((section(".buddy_allocator")));
+buddy_t pmm __attribute__((section(".buddy_allocator")));
 
 static uint32_t round_pow2(uint32_t length) {
     length--;
@@ -48,7 +48,7 @@ static uint8_t get_order(uint32_t length) {
 
 static uint32_t get_bit_tree_index(uint32_t address, uint8_t order) {
     uint8_t height = MEM_BLOCK_LOG2 - order - MIN_BLOCK_LOG2;
-    uint32_t offset = (address - alloc.base) / (1 << (MIN_BLOCK_LOG2 + order));
+    uint32_t offset = (address - pmm.base) / (1 << (MIN_BLOCK_LOG2 + order));
     uint32_t node_index = (1 << height) - 1 + offset - TRUNCATED_TREE_NODES;
 
     return node_index;
@@ -59,7 +59,7 @@ static uint8_t get_state(uint32_t address, uint8_t order) {
     uint32_t word_index = index / 32;
     uint32_t word_offset = index % 32;
 
-    uint8_t state = alloc.bit_tree[word_index] >> word_offset;
+    uint8_t state = pmm.bit_tree[word_index] >> word_offset;
 
     // Apply mask to get the desired bit
     return state & 1;
@@ -73,18 +73,18 @@ static void set_state(uint32_t address, uint8_t order, uint8_t state) {
     // Create a mask to only set the bit at the target position
     uint32_t mask = ~(1 << word_offset);
 
-    alloc.bit_tree[word_index] = (alloc.bit_tree[word_index] & mask) | state << word_offset;
+    pmm.bit_tree[word_index] = (pmm.bit_tree[word_index] & mask) | state << word_offset;
 }
 
 static void free_list_append(uint32_t address, uint8_t order) {
     buddy_block_t *block = (buddy_block_t *)(address + 0xC0000000);
 
-    if (alloc.free_lists[order]) alloc.free_lists[order]->prev = block;
+    if (pmm.free_lists[order]) pmm.free_lists[order]->prev = block;
 
     block->prev = NULL;
-    block->next = alloc.free_lists[order];
+    block->next = pmm.free_lists[order];
 
-    alloc.free_lists[order] = block;
+    pmm.free_lists[order] = block;
 }
 
 static void free_list_remove(uint32_t address, uint8_t order) {
@@ -92,7 +92,7 @@ static void free_list_remove(uint32_t address, uint8_t order) {
 
     if (block->prev != NULL) block->prev->next = block->next;
 
-    if (alloc.free_lists[order] == block) alloc.free_lists[order] = block->next;
+    if (pmm.free_lists[order] == block) pmm.free_lists[order] = block->next;
 
     if (block->next != NULL) block->next->prev = block->prev;
 
@@ -102,10 +102,10 @@ static void free_list_remove(uint32_t address, uint8_t order) {
 
 static uint8_t split(uint8_t order, uint8_t target) {
     while (order > target) {
-        buddy_block_t *block = alloc.free_lists[order];
+        buddy_block_t *block = pmm.free_lists[order];
 
         uint32_t address = (uint32_t)block - 0xC0000000;
-        uint32_t buddy_address = ((address - alloc.base) ^ 1 << (order - 1 + MIN_BLOCK_LOG2)) + alloc.base;
+        uint32_t buddy_address = ((address - pmm.base) ^ 1 << (order - 1 + MIN_BLOCK_LOG2)) + pmm.base;
 
         free_list_remove(address, order);
 
@@ -159,6 +159,8 @@ static void mark_free(uint32_t base, uint32_t length) {
         uint8_t order = get_order(length);
 
         uint32_t block_size = 2 << (order + 11);
+
+        pmm.size += block_size;
         
         free_list_append(base, order);
 
@@ -170,8 +172,8 @@ static void mark_free(uint32_t base, uint32_t length) {
 }
 
 uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
-    alloc.base = 0x0; 
-    alloc.size = 0x8000000; // 128 MiB
+    pmm.base = 0; 
+    pmm.size = 0;
 
     // Ensure regions are a power of 2, if not round it up
     for (int i = 0; i < NUM_USED_REGIONS; i++) {
@@ -182,12 +184,12 @@ uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
 
     // Initialize bit tree - all bits initially set to 1, only free blocks will be changed to 0
     for (int i = 0; i < TREE_WORDS; i++) {
-        alloc.bit_tree[i] = 0xFFFFFFFF;
+        pmm.bit_tree[i] = 0xFFFFFFFF;
     }
 
     // Initialize free lists
     for (int i = 0; i <= MAX_ORDER; i++) {
-        alloc.free_lists[i] = NULL;
+        pmm.free_lists[i] = NULL;
     }
 
     // Pointer to first memory map entry
@@ -201,10 +203,12 @@ uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
 
         if (mmap_entry->type == 1) {
             mark_free(base_addr, length);
+
             addr_end = base_addr + length;
         } else if (mmap_entry->type == 3) {
             // TODO: This is ACPI reclimable memory, ACPI data needs to be processed first
             mark_free(base_addr, length);
+
             addr_end = base_addr + length;
         }
 
@@ -225,36 +229,49 @@ uint32_t *pmm_malloc(uint32_t length) {
 
     uint8_t order = get_order(length);
 
-    // Block of the requested order is available - no need to split
-    if (alloc.free_lists[order] != NULL) {
-        buddy_block_t *block_size = alloc.free_lists[order];
+    /*
+    TODO: wake kswapd if free pages falls below low_watermark
+    uint32_t free_pages = (pmm.size - (1 << order)) / 4096;
 
-        uint32_t address = (uint32_t)block_size - 0xC0000000;
+    if (free_pages < low_watermark) wake(kswapd)
+
+    block until kswapd is done?
+    */
+
+    // Block of the requested order is available - no need to split
+    if (pmm.free_lists[order] != NULL) {
+        buddy_block_t *block = pmm.free_lists[order];
+
+        uint32_t address = (uint32_t)block - 0xC0000000;
 
         free_list_remove(address, order);
 
         // Mark block as used in the bit tree
         set_state(address, order, 1);
 
+        pmm.size -= 1 << (order + MIN_BLOCK_LOG2);
+
         return (uint32_t *)address;
     }
 
     // A best fit block was not available - search for a larger block to split
     for (int i = order + 1; i <= MAX_ORDER; i++) {
-        if (alloc.free_lists[i] != NULL) {
+        if (pmm.free_lists[i] != NULL) {
             // A larger partition found, split
             uint8_t next_order = split(i, order);
 
             if (next_order == MAX_ORDER + 1) return NULL;
 
-            buddy_block_t *block_size = alloc.free_lists[next_order];
+            buddy_block_t *block = pmm.free_lists[next_order];
 
-            uint32_t address = (uint32_t)block_size - 0xC0000000;
+            uint32_t address = (uint32_t)block - 0xC0000000;
 
             free_list_remove(address, next_order);
 
             // Mark block as used in the bit tree
             set_state(address, next_order, 1);
+
+            pmm.size -= 1 << (next_order + MIN_BLOCK_LOG2);
 
             return (uint32_t *)address;
         }
@@ -270,7 +287,7 @@ void pmm_free(uint32_t address, uint32_t length) {
 
     if (state == 0) return; // TODO: handle error if the state is 0. This probably means the length is not correct
 
-    uint32_t buddy_address = ((address - alloc.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc.base;
+    uint32_t buddy_address = ((address - pmm.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + pmm.base;
     uint8_t buddy_state = get_state(buddy_address, order);
 
     // Buddy is either split or allocated - immediately return the block to free lists
@@ -279,6 +296,8 @@ void pmm_free(uint32_t address, uint32_t length) {
 
         // Mark block as free in the bit tree
         set_state(address, order, 0);
+
+        pmm.size += 1 << (order + MIN_BLOCK_LOG2);
 
         return;
     }
@@ -296,7 +315,7 @@ void pmm_free(uint32_t address, uint32_t length) {
         set_state(address, order, 0);
 
         // Get state of buddy of the parent block
-        buddy_address = ((address - alloc.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + alloc.base;
+        buddy_address = ((address - pmm.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + pmm.base;
         buddy_state = get_state(buddy_address, order);
 
         if (buddy_state != 0) break;
@@ -304,4 +323,6 @@ void pmm_free(uint32_t address, uint32_t length) {
 
     // Add the final, merged block back to free lists
     free_list_append(address, order);
+
+    pmm.size += 1 << (order + MIN_BLOCK_LOG2);
 }

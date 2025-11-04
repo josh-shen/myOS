@@ -55,10 +55,11 @@ SECTIONS
 		*(.bootstrap_stack)
 	}
 
-	/* Buddy Allocator */
-	.buddy_allocator ALIGN(4k) : AT (ADDR(.buddy_allocator) - 0xC0000000)
+	/* Memory management */
+	.mm ALIGN(4k) : AT (ADDR(.mm) - 0xC0000000)
 	{
 		*(.buddy_allocator)
+		*(.LRU_cache)
 	}
 	
 	kernel_len = . - kernel_start - 0xC0000000;

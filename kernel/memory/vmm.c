@@ -25,8 +25,8 @@ static uint32_t get_current_pd() {
 
 static uint32_t create_new_pt() {
     uint32_t *pt_addr = pmm_malloc(4096); // One page table fits in 4 KiB
-
-    if (pt_addr == NULL) { /* TODO: handle out of memory */ }
+    
+    lru_cache_add(pt_addr + 0xC0000000);
 
     page_table_t *pt = (page_table_t *)(pt_addr + 0xC0000000);
 
@@ -163,7 +163,7 @@ uint32_t *vmm_malloc(uint32_t length) {
     while (length >= 4096) {
         uint32_t *phys_addr = pmm_malloc(4096);
 
-        if (phys_addr == NULL) { /* TODO: handle out of memory */ }
+        lru_cache_add(curr_virt_addr);
         
         vmm_map((uint32_t)curr_virt_addr, (uint32_t)phys_addr, 0x3);
         
@@ -188,6 +188,8 @@ void vmm_free(uint32_t virt_addr, uint32_t length) {
 
     while (length >= 4096) {
         uint32_t phys_addr = vmm_unmap(virt_addr);
+
+        lru_cache_del(virt_addr);
 
         pmm_free(phys_addr, 4096);
 
