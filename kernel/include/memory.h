@@ -2,7 +2,6 @@
 #define _MEMORY_H
 
 #include <stdint.h>
-#include <stddef.h>
 
 /* Physical memory manager, buddy allocator */
 #define MEM_BLOCK_LOG2 27

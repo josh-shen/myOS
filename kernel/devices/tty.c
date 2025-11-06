@@ -1,7 +1,5 @@
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 #include <io.h>
 
 #include <tty.h>
@@ -71,12 +69,11 @@ void terminal_update_cursor(size_t x, size_t y) {
 }
 
 void terminal_shift_up() {
-	unsigned char blank = ' ';
 	for (size_t i = 0; i < VGA_WIDTH * (VGA_HEIGHT - 1); i++) {
 		terminal_buffer[i] = terminal_buffer[i + VGA_WIDTH];
 	}
 	for (size_t i = VGA_WIDTH * (VGA_HEIGHT - 1); i < VGA_WIDTH * VGA_HEIGHT; i++) {
-		terminal_buffer[i] = vga_entry(blank, terminal_color);
+		terminal_buffer[i] = vga_entry(' ', terminal_color);
 	}
 	terminal_row = VGA_HEIGHT - 1;
 }

@@ -33,14 +33,14 @@ static void refill(uint32_t target) {
         // Remove from the active list - the node will either be moved to the head the list or demoted
         list_remove(lru_cache.active_tail, curr);
 
-        if (curr->virt_addr & 0x20 == 0x20) {
+        if ((curr->virt_addr & 0x20) == 0x20) {
             // TODO: clear accessed bit
 
             // Move to head of active list
             list_append(lru_cache.active_head, curr);
         }
 
-        if (curr->virt_addr & 0x20 == 0) {
+        if ((curr->virt_addr & 0x20) == 0) {
             // Demote to inactive list
             list_append(lru_cache.inactive_head, curr);
 
@@ -71,7 +71,7 @@ static void reclaim(uint32_t mark) {
 
         lru_cache.inactive--;
 
-        if (curr->virt_addr & 0x20 == 0x20) {
+        if ((curr->virt_addr & 0x20) == 0x20) {
             // TODO: clear accessed bit
 
             // Promote to active list
@@ -80,7 +80,7 @@ static void reclaim(uint32_t mark) {
             lru_cache.active++;
         }
 
-        if (curr->virt_addr & 0x20 == 0) {
+        if ((curr->virt_addr & 0x20) == 0) {
             // TODO: move page to swap space
 
             mark++;

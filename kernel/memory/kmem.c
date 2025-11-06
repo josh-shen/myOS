@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <stdio.h>
+#include <stddef.h>
 
 #include <memory.h>
 
@@ -30,7 +30,9 @@ static object_t *object_alloc(cache_t *cache) {
         }
 
         return obj;
-    } else if (cache->slabs_empty != NULL) {
+    }
+
+    if (cache->slabs_empty != NULL) {
         slab_t *target_slab = cache->slabs_empty;
 
         object_t *obj = target_slab->head;
@@ -48,6 +50,7 @@ static object_t *object_alloc(cache_t *cache) {
 
         return obj;
     }
+    return NULL; // This should never happen
 }
 
 static void slab_cache_grow(uint32_t base, uint32_t length) {
@@ -129,7 +132,7 @@ static void cache_init(cache_t *cache, uint32_t objsize) {
 }
 
 void kmem_init() {
-    // Allocate one page for slab struct cache and and the cache's slab objects
+    // Allocate one page for slab struct cache and the cache's slab objects
     uint32_t addr = (uint32_t)vmm_malloc(4096);
 
     // Initialize slab struct cache
@@ -145,7 +148,7 @@ void kmem_init() {
     // Add first slabs to the slab cache
     slab_cache_grow(addr, 4096 - (2 * sizeof(cache_t)));
     
-    // Use slab cache to grow cache cache
+    // Use slab cache to grow cache_cache
     cache_grow(cache_cache);
 
     // Create general purpose caches for sizes 2^5 to 2^11
@@ -193,10 +196,10 @@ void kfree(void *obj, uint32_t length) {
     if (curr->slabs_full != NULL) {
         slab_t *target_slab = curr->slabs_full;
 
-        object_t *obj = (object_t *)obj;
+        object_t *head = target_slab->head;
 
-        obj->next = target_slab->head;
-        target_slab->head = obj;
+        head->next = target_slab->head;
+        target_slab->head = head;
         target_slab->inuse--;
 
         curr->slabs_full = NULL;
@@ -204,10 +207,10 @@ void kfree(void *obj, uint32_t length) {
     } else if (curr->slabs_partial != NULL) {
         slab_t *target_slab = curr->slabs_partial;
 
-        object_t *obj = (object_t *)obj;
+        object_t *head = target_slab->head;
 
-        obj->next = target_slab->head;
-        target_slab->head = obj;
+        head->next = target_slab->head;
+        target_slab->head = head;
         target_slab->inuse--;
 
         if (target_slab->inuse == 0) {

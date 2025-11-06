@@ -1,12 +1,10 @@
 #include <stdint.h>
 #include <io.h>
-#include <stdio.h>
 
 #include <interrupts.h>
 
 static void irq_remap(void);
 
-extern void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 extern void irq0();
 extern void irq1();
 extern void irq2();

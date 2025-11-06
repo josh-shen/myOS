@@ -2,7 +2,6 @@
 
 #include <interrupts.h>
 
-extern void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 extern void isr0();
 extern void isr1();
 extern void isr2();
@@ -73,18 +72,8 @@ void isr_init() {
 
 void isr_handler(registers_t regs) {
    printf("\nrecieved interrupt: 0x%x\n", regs.int_num);
-   
-   if (regs.int_num == 0x14) page_fault_handler(regs.err_code);
 
-   else __asm__ volatile ("hlt");
+   __asm__ volatile ("hlt");
    // TODO: implement actual interrupt handling
 } 
 
-void page_fault_handler(uint32_t err_code) {
-   /*
-   check if page causing the fault is in inactive list
-   if so, page is just inactive. set present bit back to 1, move to active list, continue
-
-   otherwise, page is not in main memory. find a page in inactive list to swap with
-   */
-}

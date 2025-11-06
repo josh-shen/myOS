@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <stdio.h>
+#include <stddef.h>
 
 #include <memory.h>
 
@@ -26,7 +26,7 @@ static uint32_t get_current_pd() {
 static uint32_t create_new_pt() {
     uint32_t *pt_addr = pmm_malloc(4096); // One page table fits in 4 KiB
     
-    lru_cache_add(pt_addr + 0xC0000000);
+    //lru_cache_add(pt_addr + 0xC0000000);
 
     page_table_t *pt = (page_table_t *)(pt_addr + 0xC0000000);
 
@@ -56,14 +56,13 @@ static void merge(vm_area_t *node) {
 
     while (next != NULL) {
         if (next->used == 1) {
-            node = node->next;
             return;
         }
 
         node->size = node->size + next->size;
         node->next = next->next;
 
-        kfree(next, sizeof(next));
+        kfree(next, sizeof(vm_area_t));
     }
 }
 
@@ -91,7 +90,7 @@ void vmm_init(uint32_t virt_addr_base) {
     uint32_t length = 0xFFFFFFFF - virt_addr_base;
 
     // Allocate a page for inital linked list node
-    uint32_t *addr = pmm_malloc(4096);
+    uint32_t addr = (uint32_t)pmm_malloc(4096);
 
     // Create one 4 KiB node - this will be used to initialize the slab allocator
     vm_area_t *page_node = (vm_area_t *)(addr + 0xC0000000);
@@ -163,7 +162,7 @@ uint32_t *vmm_malloc(uint32_t length) {
     while (length >= 4096) {
         uint32_t *phys_addr = pmm_malloc(4096);
 
-        lru_cache_add(curr_virt_addr);
+        //lru_cache_add(curr_virt_addr);
         
         vmm_map((uint32_t)curr_virt_addr, (uint32_t)phys_addr, 0x3);
         
@@ -189,7 +188,7 @@ void vmm_free(uint32_t virt_addr, uint32_t length) {
     while (length >= 4096) {
         uint32_t phys_addr = vmm_unmap(virt_addr);
 
-        lru_cache_del(virt_addr);
+        //lru_cache_del(virt_addr);
 
         pmm_free(phys_addr, 4096);
 
