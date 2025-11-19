@@ -16,6 +16,11 @@ page_table_t boot_page_tables[4] __attribute__((section(".page_tables")))__attri
 // Kernel vm area linked list
 vm_area_t *head = NULL;
 
+/**
+ * @brief Retrieves the current page directory address from the CR3 register.
+ *
+ * @return The physical address of the current page directory.
+ */
 static uint32_t get_current_pd() {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
@@ -23,10 +28,16 @@ static uint32_t get_current_pd() {
     return cr3;
 }
 
+/**
+ * @brief Creates and initializes a new page table.
+ *
+ * This function allocates a 4 KiB page from physical memory to hold a new page
+ * table. All 1024 entries are initialized to zero, marking them as not present.
+ *
+ * @return The physical address of the newly created page table.
+ */
 static uint32_t create_new_pt() {
     uint32_t *pt_addr = pmm_malloc(4096); // One page table fits in 4 KiB
-    
-    //lru_cache_add(pt_addr + 0xC0000000);
 
     page_table_t *pt = (page_table_t *)(pt_addr + 0xC0000000);
 
@@ -37,6 +48,17 @@ static uint32_t create_new_pt() {
     return (uint32_t)pt_addr;
 }
 
+/**
+ * @brief Splits a virtual memory area node into two separate nodes.
+ *
+ * This function divides a virtual memory area node at @p length. The original
+ * node is resized to @p length, and a new node is allocated with kmalloc and
+ * sized to the remainder of the original size. The new node is inserted into
+ * the linked list of virutal memory areas immediately after the original node.
+ *
+ * @param node Pointer to the vm_area_t node to be split.
+ * @param length The size of the node to be split off (in bytes).
+ */
 static void split(vm_area_t *node, uint32_t length) {
     uint32_t *addr = kmalloc(sizeof(vm_area_t));
 
@@ -51,6 +73,16 @@ static void split(vm_area_t *node, uint32_t length) {
     node->next = split;
 }
 
+/**
+ * @brief Merges free virtual memory area nodes.
+ *
+ * This function attempts to merge @p node with all consecutive unused nodes in
+ * the linked list of virtual memory areas. Merging continues until a used node
+ * is encountered or the end of the list is reached. Memory usesd by leftover
+ * merged nodes is freed using kfree.
+ *
+ * @param node Pointer to the starting vm_area_t node for merging.
+ */
 static void merge(vm_area_t *node) {
     vm_area_t *next = node->next;
 
@@ -66,6 +98,18 @@ static void merge(vm_area_t *node) {
     }
 }
 
+/**
+ * @brief Finds and allocates a virtual memory area of the requested size.
+ *
+ * This function searches the linked list of virtual memory areas for an unused
+ * region that can accommodate the requested length. If a larger region is
+ * found, it is split to match the exact size needed. The found region is
+ * marked as used and its address is returned.
+ *
+ * @param length The size of the virtual memory area needed (in bytes).
+ * @return Pointer to the starting address of the allocated virtual memory area,
+ *         or NULL if no suitable area is found.
+ */
 static void *get_vm_area(uint32_t length) {
     vm_area_t *node = head;
 
@@ -86,6 +130,18 @@ static void *get_vm_area(uint32_t length) {
     return NULL;
 }
 
+/**
+ * @brief Initializes the virtual memory manager.
+ *
+ * This function sets up the virtual memory managemer by creating the initial
+ * linked list of vm_area_t nodes. It reserves one 4 KiB node for slab allocator
+ * initialization and creates a second node for the remaining virtual address
+ * space from @p virt_addr_base to 0xFFFFFFFF. Both nodes are initially marked
+ * as unused.
+ *
+ * @param virt_addr_base The starting virtual address for the managed memory
+ *        region.
+ */
 void vmm_init(uint32_t virt_addr_base) {
     uint32_t length = 0xFFFFFFFF - virt_addr_base;
 
@@ -115,6 +171,18 @@ void vmm_init(uint32_t virt_addr_base) {
     head->next = node;
 }
 
+/**
+ * @brief Maps a virtual address to a physical address in the page tables.
+ *
+ * This function establishes a mapping between @p virt_addr and @p phys_addr by
+ * updating the appropriate page directory and page table entries. If the
+ * required page table does not exist, it is created automatically. The function
+ * does not overwrite existing mappings if the page is already present.
+ *
+ * @param virt_addr The virtual address to be mapped.
+ * @param phys_addr The physical address to map to.
+ * @param flags Page table flags.
+ */
 void vmm_map(uint32_t virt_addr, uint32_t phys_addr, uint32_t flags) {
     uint32_t pde_index = (virt_addr >> 22) & 0x3FF;
     uint32_t pte_index = (virt_addr >> 12) & 0x3FF;
@@ -136,6 +204,17 @@ void vmm_map(uint32_t virt_addr, uint32_t phys_addr, uint32_t flags) {
     }
 }
 
+/**
+ * @brief Unmaps a virtual address and returns its physical address.
+ *
+ * This function removes the mapping for @p virt_addr by clearing the
+ * corresponding page table entry. The physical address mapped to @p virt_addr
+ * is extracted and returned before the entry is cleared.
+ *
+ * @param virt_addr The virtual address to be unmapped.
+ * @return The physical address that was previously mapped to the virtual
+ *         address.
+ */
 uint32_t vmm_unmap(uint32_t virt_addr) {
     uint32_t pde_index = (virt_addr >> 22) & 0x3FF;
     uint32_t pte_index = (virt_addr >> 12) & 0x3FF;
@@ -152,6 +231,19 @@ uint32_t vmm_unmap(uint32_t virt_addr) {
     return phys_addr;
 }
 
+/**
+ * @brief Allocates virtual memory with physical page backing.
+ *
+ * This function allocates a contiguous virtual memory region of @p length and
+ * maps it to physical memory pages. Physical pages are allocated in 4 KiB
+ * chunks and mapped to consecutive virtual addresses with read/write
+ * permissions (flags 0x3). The allocation is performed page by page until the
+ * requested length is satisfied.
+ *
+ * @param length The size of the memory region to allocate (in bytes).
+ * @return Pointer to the starting virtual address of the allocated memory, or
+ *         NULL if virtual memory allocation fails.
+ */
 uint32_t *vmm_malloc(uint32_t length) {
     uint32_t *virt_addr = get_vm_area(length);
 
@@ -161,8 +253,6 @@ uint32_t *vmm_malloc(uint32_t length) {
 
     while (length >= 4096) {
         uint32_t *phys_addr = pmm_malloc(4096);
-
-        //lru_cache_add(curr_virt_addr);
         
         vmm_map((uint32_t)curr_virt_addr, (uint32_t)phys_addr, 0x3);
         
@@ -173,6 +263,17 @@ uint32_t *vmm_malloc(uint32_t length) {
     return virt_addr;
 }
 
+/**
+ * @brief Frees previously allocated virtual memory and its physical backing.
+ *
+ * This function frees a virtual memory region by marking the corresponding
+ * vm_area_t node as unused and merging it with adjacent free nodes. Each page
+ * is unmapped and the associated physical memory freed. Like the allocation
+ * process, deallocation is performed in 4 KiB page increments.
+ *
+ * @param virt_addr The starting virtual address of the memory to free.
+ * @param length The size of the memory region to free (in bytes).
+ */
 void vmm_free(uint32_t virt_addr, uint32_t length) {
     vm_area_t *node = head;
 
@@ -187,8 +288,6 @@ void vmm_free(uint32_t virt_addr, uint32_t length) {
 
     while (length >= 4096) {
         uint32_t phys_addr = vmm_unmap(virt_addr);
-
-        //lru_cache_del(virt_addr);
 
         pmm_free(phys_addr, 4096);
 

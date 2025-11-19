@@ -26,6 +26,15 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
 
 buddy_t pmm __attribute__((section(".buddy_allocator")));
 
+/**
+ * @brief Rounds an integer up to the nearest power of 2.
+ *
+ * This function uses bit manipulation to compute the smallest power of 2 that
+ * is greater than or equal to @p length.
+ *
+ * @param length The integer value to be rounded up.
+ * @return The smallest power of 2 greater than or equal to length.
+ */
 static uint32_t round_pow2(uint32_t length) {
     length--;
     length |= length >> 1;
@@ -38,6 +47,16 @@ static uint32_t round_pow2(uint32_t length) {
     return length;
 }
 
+/**
+ * @brief Calculates the order of a memory block for the buddy allocator.
+ *
+ * This function determines the order of a memory block based on its length. It
+ * searches from the maximum order down to find the largest order that fits in
+ * @p length.
+ *
+ * @param length The size of the memory block (in bytes).
+ * @return The order value (0 to MAX_ORDER) corresponding to the block size.
+ */
 static uint8_t get_order(uint32_t length) {
     for (int n = MAX_BLOCK_LOG2; n >= MIN_BLOCK_LOG2; n--) {
         if ((unsigned)(1 << n) <= length) return n - MIN_BLOCK_LOG2;
@@ -45,6 +64,17 @@ static uint8_t get_order(uint32_t length) {
     return 0;
 }
 
+/**
+ * @brief Calculates the bit tree index for a memory block.
+ *
+ * This function finds the position of a memory block in the buddy allocator's
+ * bit tree structure. The index is calculated based on the block's address and
+ * order, accounting for truncated tree nodes at higher levels.
+ *
+ * @param address The physical address of the memory block.
+ * @param order The order of the memory block.
+ * @return The index of the block in the bit tree array.
+ */
 static uint32_t get_bit_tree_index(uint32_t address, uint8_t order) {
     uint8_t height = MEM_BLOCK_LOG2 - order - MIN_BLOCK_LOG2;
     uint32_t offset = (address - pmm.base) / (1 << (MIN_BLOCK_LOG2 + order));
@@ -53,6 +83,16 @@ static uint32_t get_bit_tree_index(uint32_t address, uint8_t order) {
     return node_index;
 }
 
+/**
+ * @brief Retrieves the allocation state of a memory block from the bit tree.
+ *
+ * This function reads the state bit for a specific memory block from the buddy
+ * allocator's bit tree.
+ *
+ * @param address The physical address of the memory block.
+ * @param order The order of the memory block.
+ * @return The state bit value (0 for free, 1 for allocated/split).
+ */
 static uint8_t get_state(uint32_t address, uint8_t order) {
     uint32_t index = get_bit_tree_index(address, order);
     uint32_t word_index = index / 32;
@@ -64,6 +104,17 @@ static uint8_t get_state(uint32_t address, uint8_t order) {
     return state & 1;
 }
 
+/**
+ * @brief Sets the state of a memory block in the bit tree.
+ *
+ * This function updates the state bit for a specific memory block in the buddy
+ * allocator's bit tree. The function preserves all other bits in the word by
+ * using a mask operation, then sets the target bit to @p state
+ *
+ * @param address The physical address of the memory block.
+ * @param order The order of the memory block.
+ * @param state The state value to set (0 for free, 1 for allocated/split).
+ */
 static void set_state(uint32_t address, uint8_t order, uint8_t state) {
     uint32_t index = get_bit_tree_index(address, order);
     uint32_t word_index = index / 32;
@@ -75,6 +126,16 @@ static void set_state(uint32_t address, uint8_t order, uint8_t state) {
     pmm.bit_tree[word_index] = (pmm.bit_tree[word_index] & mask) | state << word_offset;
 }
 
+/**
+ * @brief Adds a memory block to the free list of its order.
+ *
+ * This function inserts a memory block at the head of the free list
+ * corresponding to its order. The block is accessed through its higher half
+ * virtual address.
+ *
+ * @param address The physical address of the memory block to add.
+ * @param order The order of the memory block.
+ */
 static void free_list_append(uint32_t address, uint8_t order) {
     buddy_block_t *block = (buddy_block_t *)(address + 0xC0000000);
 
@@ -86,6 +147,15 @@ static void free_list_append(uint32_t address, uint8_t order) {
     pmm.free_lists[order] = block;
 }
 
+/**
+ * @brief Removes a memory block from the free list of its order.
+ *
+ * This function extracts a memory block from its free list by updating the next
+ * and previous pointers of adjacent blocks.
+ *
+ * @param address The physical address of the memory block to remove.
+ * @param order The order of the memory block.
+ */
 static void free_list_remove(uint32_t address, uint8_t order) {
     buddy_block_t *block = (buddy_block_t *)(address + 0xC0000000);
 
@@ -99,6 +169,19 @@ static void free_list_remove(uint32_t address, uint8_t order) {
     block->next = NULL;
 }
 
+/**
+ * @brief Splits a memory block down to the target order.
+ *
+ * This function recursively divides a memory block into smaller buddy blocks
+ * until the target order is reached. At each split, the parent block is
+ * removed from its free list, marked as split in the bit tree, and both
+ * resulting buddy blocks are added to the free list of the next lower order.
+ * The buddy address is calculated using XOR operations.
+ *
+ * @param order The current order of the block to split.
+ * @param target The desired order after splitting.
+ * @return The final order after splitting, or MAX_ORDER + 1 on error.
+ */
 static uint8_t split(uint8_t order, uint8_t target) {
     while (order > target) {
         buddy_block_t *block = pmm.free_lists[order];
@@ -125,6 +208,17 @@ static uint8_t split(uint8_t order, uint8_t target) {
     return MAX_ORDER + 1;
 }
 
+/**
+ * @brief Marks a region of memory as free and adds it to the allocator.
+ *
+ * This function processes a memory region by filtering out known used regions,
+ * creating higher-half linear mappings, and adding free blocks to the buddy
+ * allocator's free lists. Free memory regions are divided into order-sized
+ * blocks, and each block is marked as 1 (free) in the bit tree.
+ *
+ * @param base The starting physical address of the memory region.
+ * @param length The size of the memory region (in bytes).
+ */
 static void mark_free(uint32_t base, uint32_t length) {
     if (length == 0) return;
 
@@ -170,6 +264,18 @@ static void mark_free(uint32_t base, uint32_t length) {
     }
 }
 
+/**
+ * @brief Initializes the physical memory manager and buddy allocator.
+ *
+ * This function sets up the physical memory manager using the multiboot memory
+ * map to discover usable memory regions. It initializes the bit tree to all 1
+ * (allocated), initializes the free lists, and processes memory map entries to
+ * mark available regions as free.
+ *
+ * @param mmap_addr The physical address of the multiboot memory map.
+ * @param mmap_length The length of the memory map (in bytes).
+ * @return The last virtual address used for linear mapping plus a one-page gap.
+ */
 uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm.base = 0; 
     pmm.size = 0;
@@ -219,10 +325,23 @@ uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
     
-    // Return last used virtual address used for linear mappings with a one page gap
+    // Return last virtual address used for linear mappings with a one-page gap
     return addr_end + 0xC0001000;
 }
 
+/**
+ * @brief Allocates a physical memory block of the requested size.
+ *
+ * This function finds and allocates a memory block from the buddy allocator
+ * that satisfies the requested size. It first attempts to allocate a block of
+ * the exact order requested. If unavailable, it searches for a larger block and
+ * splits it to the required size. The allocated block is removed from its free
+ * list and marked as used in the bit tree.
+ *
+ * @param length The size of memory to allocate (in bytes).
+ * @return Pointer to the physical address of the allocated block, or NULL if
+ *         allocation fails or length exceeds maximum block size.
+ */
 uint32_t *pmm_malloc(uint32_t length) {
     if (length > 1 << MAX_BLOCK_LOG2) return NULL;
 
@@ -279,6 +398,17 @@ uint32_t *pmm_malloc(uint32_t length) {
     return NULL;
 }
 
+/**
+ * @brief Frees a previously allocated physical memory block.
+ *
+ * This function returns a memory block to the buddy allocator and attempts to
+ * merge it with its buddy if the buddy is also free. Merging continues while
+ * both buddies remain free. The final merged block is added to the appropriate
+ * free list and marked as free in the bit tree.
+ *
+ * @param address The physical address of the memory block to free.
+ * @param length The size of the memory block (in bytes).
+ */
 void pmm_free(uint32_t address, uint32_t length) {
     uint8_t order = get_order(length);
 

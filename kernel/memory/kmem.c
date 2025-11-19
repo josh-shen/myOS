@@ -13,6 +13,18 @@ static cache_t *cache_chain = NULL;
 static cache_t *cache_cache = NULL;
 static cache_t *slab_cache = NULL;
 
+/**
+ * @brief Allocates an object from a cache.
+ *
+ * This function retrieves a free object from @p cache by searching through
+ * partially filled and empty slabs. If no slabs with free objects are available
+ * the cache is grown. When an object is allocated, the slab's in-use count is
+ * incremented, and the slab may be moved between different lists based on its
+ * occupancy.
+ *
+ * @param cache Pointer to the cache from which to allocate an object.
+ * @return Pointer to the allocated object, or NULL if allocation fails.
+ */
 static object_t *object_alloc(cache_t *cache) {
     if (cache->slabs_empty == NULL && cache->slabs_partial == NULL) cache_grow(cache);
      
@@ -53,6 +65,14 @@ static object_t *object_alloc(cache_t *cache) {
     return NULL; // This should never happen
 }
 
+/**
+ * @brief Grows the slab cache by populating it with new slab objects.
+ *
+ * This function is used for growing the slab cache. Growing the slab cache
+ * requires alllocating additional memory from the virtual memory manager. It
+ * creates a linked list of slab objects within the allocated memory range. All
+ * created slab objects are added to the empty slabs list of the slab cache.
+ */
 static void slab_cache_grow(uint32_t base, uint32_t length) {
     slab_t *slab = (slab_t *)(base);
     slab->head = NULL;
@@ -75,6 +95,18 @@ static void slab_cache_grow(uint32_t base, uint32_t length) {
     slab_cache->slabs_empty = slab;
 }
 
+/**
+ * @brief Grows a cache by adding a new slab with objects.
+ *
+ * This function expands a cache's capacity by allocating a new slab structure
+ * from the slab cache and a 4 KiB page of virtual memory to hold the objects.
+ * The new page is divided into objects of the cache's object size, and all
+ * objects are linked together in a free list. The new slab is added to the
+ * cache's empty slabs list. If the slab cache itself needs space, it is grown
+ * first.
+ *
+ * @param cache Pointer to the cache to grow.
+ */
 static void cache_grow(cache_t *cache) {
    if (slab_cache->slabs_empty == NULL && slab_cache->slabs_partial == NULL) {
         uint32_t *addr = vmm_malloc(4096);
@@ -109,6 +141,17 @@ static void cache_grow(cache_t *cache) {
    cache->slabs_empty = new_slab;
 }
 
+/**
+ * @brief Creates a new cache for objects of a specific size.
+ *
+ * This function allocates a new cache structure from the cache of caches,
+ * initializes it for the specified object size, and grows it to contain an
+ * initial slab of objects. If the cache of caches has no free cache structures
+ * available, it is grown first.
+ *
+ * @param objsize The size of objects that will be stored in this cache.
+ * @return Pointer to the newly created cache.
+ */
 static cache_t *cache_create(uint32_t objsize) {
     if (cache_cache->slabs_empty == NULL && cache_cache->slabs_partial == NULL) cache_grow(cache_cache);
 
@@ -122,6 +165,17 @@ static cache_t *cache_create(uint32_t objsize) {
     return new_cache;
 }
 
+/**
+ * @brief Initializes a cache structure with specified parameters.
+ *
+ * This function sets up a cache_t structure by configuring its object size,
+ * calculating the number of objects that fit in a 4 KiB slab, and initializing
+ * all slab list pointers to NULL. The cache is prepared for use but contains no
+ * slabs until it is grown.
+ *
+ * @param cache Pointer to the cache structure to initialize.
+ * @param objsize The size of objects that will be stored in this cache.
+ */
 static void cache_init(cache_t *cache, uint32_t objsize) {
     cache->objsize = objsize;
     cache->num = 4096 / objsize;
@@ -131,6 +185,14 @@ static void cache_init(cache_t *cache, uint32_t objsize) {
     cache->slabs_empty = NULL;
 }
 
+/**
+ * @brief Initializes the kernel memory allocator (slab allocator).
+ *
+ * This function sets up the kernel heap manager. It initializes two special
+ * caches, one for slab structures and one for cache structures, using a single
+ * 4 KiB page from the virtual memory manager. It then creates a chain of
+ * general-purpose caches for object sizes from 32 bytes to 2048 bytes.
+ */
 void kmem_init() {
     // Allocate one page for slab struct cache and the cache's slab objects
     uint32_t addr = (uint32_t)vmm_malloc(4096);
@@ -162,13 +224,25 @@ void kmem_init() {
     }
 }
 
-void *kmalloc(uint32_t size) {
-    if (size > 2048) return vmm_malloc(size);
+/**
+ * @brief Allocates kernel memory of the requested size.
+ *
+ * This function provides dynamic memory allocation for the kernel. For
+ * allocations larger than 2048 bytes, memory is allocated directly from the
+ * virtual memory manager. For smaller allocations, the function searches the
+ * cache chain to find the smallest cache that can accommodate the requested
+ * size, then allocates an object from that cache.
+ *
+ * @param length The size of memory to allocate (in bytes).
+ * @return Pointer to the allocated memory, or NULL if allocation fails.
+ */
+void *kmalloc(uint32_t length) {
+    if (length > 2048) return vmm_malloc(length);
 
     cache_t *curr = cache_chain;
 
     while (curr != NULL) {
-        if (curr->objsize >= size) return object_alloc(curr);
+        if (curr->objsize >= length) return object_alloc(curr);
 
         curr = curr->next;
     }
@@ -176,6 +250,19 @@ void *kmalloc(uint32_t size) {
     return NULL;
 }
 
+/**
+ * @brief Frees previously allocated kernel memory.
+ *
+ * This function returns memory to the kernel memory manager. For allocations
+ * larger than 2048 bytes, memory is freed directly through the virtual memory
+ * manager. For smaller allocations, the function finds the appropriate cache in
+ * the cache chain and returns the object to its slab. When an object is freed,
+ * the slab's in-use count is decremented, and the slab may be moved between
+ * lists based on its new occupancy state.
+ *
+ * @param obj Pointer to the memory to free.
+ * @param length The size of the memory allocation (in bytes).
+ */
 void kfree(void *obj, uint32_t length) {
     uint32_t addr = (uint32_t)obj;
     
