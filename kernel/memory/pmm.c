@@ -24,7 +24,7 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
     {0xB80000, 8000}                                    // VGA memory
 };
 
-buddy_t pmm __attribute__((section(".buddy_allocator"))); page fault?
+buddy_t pmm __attribute__((section(".buddy_allocator")));
 
 /**
  * @brief Rounds an integer up to the nearest power of 2.
