@@ -24,7 +24,7 @@ static uintptr_t used_regions[NUM_USED_REGIONS][2] = {
     {0xB80000, 8000}                                    // VGA memory
 };
 
-buddy_t pmm __attribute__((section(".buddy_allocator")));
+buddy_t pmm __attribute__((section(".buddy_allocator"))); page fault?
 
 /**
  * @brief Rounds an integer up to the nearest power of 2.
@@ -240,20 +240,20 @@ static void mark_free(uint32_t base, uint32_t length) {
     uint32_t addr = base;
     uint32_t unmapped_length = length;
     
-    while (unmapped_length >= 4096) {
+    while (unmapped_length >= PAGE_SIZE) {
         vmm_map(addr + 0xC0000000, addr, 0x3);
 
-        addr += 4096;
-        unmapped_length -= 4096; 
+        addr += PAGE_SIZE;
+        unmapped_length -= PAGE_SIZE;
     }
     
     // Add memory to free lists to mark as free
-    while (length >= 4096) {
+    while (length >= PAGE_SIZE) {
         uint8_t order = get_order(length);
 
         uint32_t block_size = 2 << (order + 11);
 
-        pmm.size += block_size;
+        pmm.free += block_size;
         
         free_list_append(base, order);
 
@@ -279,6 +279,7 @@ static void mark_free(uint32_t base, uint32_t length) {
 uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm.base = 0; 
     pmm.size = 0;
+    pmm.free = 0;
 
     // Ensure regions are a power of 2, if not round it up
     for (int i = 0; i < NUM_USED_REGIONS; i++) {
@@ -321,7 +322,7 @@ uint32_t pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         mmap_entry = (mmap_entry_t *)((uint32_t)mmap_entry + mmap_entry->size + sizeof(mmap_entry->size));
     }
 
-    // TODO: Mark areas used by boot modules (mods_*), okther multiboot info needed
+    // TODO: Mark areas used by boot modules (mods_*), other multiboot info needed
     
     // TODO: Unmap the identiy mapping of the first 4 MiB of memory
     
@@ -349,11 +350,16 @@ uint32_t *pmm_malloc(uint32_t length) {
 
     /*
     TODO: wake kswapd if free pages falls below low_watermark
-    uint32_t free_pages = (pmm.size - (1 << order)) / 4096;
+    uint32_t min_watermark = pmm.size / PAGE_SIZE / 128;
+    // 20 <= p <= 255, p = total free pages / 128
+    if (min_watermark < 20) min_watermark = 20;
+    else if (min_watermark > 255) min_watermark = 255;
+
+    uint32_t low_watermark = min_watermark * 2;
+
+    uint32_t free_pages = (pmm.free - (1 << order)) / PAGE_SIZE;
 
     if (free_pages < low_watermark) wake(kswapd)
-
-    block until kswapd is done?
     */
 
     // Block of the requested order is available - no need to split
@@ -367,7 +373,7 @@ uint32_t *pmm_malloc(uint32_t length) {
         // Mark block as used in the bit tree
         set_state(address, order, 1);
 
-        pmm.size -= 1 << (order + MIN_BLOCK_LOG2);
+        pmm.free -= 1 << (order + MIN_BLOCK_LOG2);
 
         return (uint32_t *)address;
     }
@@ -389,7 +395,7 @@ uint32_t *pmm_malloc(uint32_t length) {
             // Mark block as used in the bit tree
             set_state(address, next_order, 1);
 
-            pmm.size -= 1 << (next_order + MIN_BLOCK_LOG2);
+            pmm.free -= 1 << (next_order + MIN_BLOCK_LOG2);
 
             return (uint32_t *)address;
         }
@@ -414,7 +420,7 @@ void pmm_free(uint32_t address, uint32_t length) {
 
     uint8_t state = get_state(address, order);
 
-    if (state == 0) return; // TODO: handle error if the state is 0. This probably means the length is not correct
+    if (state == 0) return; // TODO: implement better error handlng. page fault?
 
     uint32_t buddy_address = ((address - pmm.base) ^ 1 << (order + MIN_BLOCK_LOG2)) + pmm.base;
     uint8_t buddy_state = get_state(buddy_address, order);
@@ -426,7 +432,7 @@ void pmm_free(uint32_t address, uint32_t length) {
         // Mark block as free in the bit tree
         set_state(address, order, 0);
 
-        pmm.size += 1 << (order + MIN_BLOCK_LOG2);
+        pmm.free += 1 << (order + MIN_BLOCK_LOG2);
 
         return;
     }
@@ -453,5 +459,5 @@ void pmm_free(uint32_t address, uint32_t length) {
     // Add the final, merged block back to free lists
     free_list_append(address, order);
 
-    pmm.size += 1 << (order + MIN_BLOCK_LOG2);
+    pmm.free += 1 << (order + MIN_BLOCK_LOG2);
 }

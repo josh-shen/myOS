@@ -9,9 +9,9 @@ static void split(vm_area_t *, uint32_t);
 static void merge(vm_area_t *);
 static void *get_vm_area(uint32_t);
 
-page_directory_t boot_page_directory __attribute__((section(".page_tables")))__attribute__((aligned(4096)));
+page_directory_t boot_page_directory __attribute__((section(".page_tables")))__attribute__((aligned(PAGE_SIZE)));
 // Four page tables used for kernel mapping during boot
-page_table_t boot_page_tables[4] __attribute__((section(".page_tables")))__attribute__((aligned(4096)));
+page_table_t boot_page_tables[4] __attribute__((section(".page_tables")))__attribute__((aligned(PAGE_SIZE)));
 
 // Kernel vm area linked list
 vm_area_t *head = NULL;
@@ -37,7 +37,7 @@ static uint32_t get_current_pd() {
  * @return The physical address of the newly created page table.
  */
 static uint32_t create_new_pt() {
-    uint32_t *pt_addr = pmm_malloc(4096); // One page table fits in 4 KiB
+    uint32_t *pt_addr = pmm_malloc(PAGE_SIZE); // One page table fits in 4 KiB
 
     page_table_t *pt = (page_table_t *)(pt_addr + 0xC0000000);
 
@@ -146,20 +146,20 @@ void vmm_init(uint32_t virt_addr_base) {
     uint32_t length = 0xFFFFFFFF - virt_addr_base;
 
     // Allocate a page for inital linked list node
-    uint32_t addr = (uint32_t)pmm_malloc(4096);
+    uint32_t addr = (uint32_t)pmm_malloc(PAGE_SIZE);
 
     // Create one 4 KiB node - this will be used to initialize the slab allocator
     vm_area_t *page_node = (vm_area_t *)(addr + 0xC0000000);
     page_node->addr = virt_addr_base;
-    page_node->size = 4096;
+    page_node->size = PAGE_SIZE;
     page_node->used = 0;
     page_node->next = NULL;
 
     head = page_node;
     
     addr += sizeof(vm_area_t);
-    virt_addr_base += 4096;
-    length -= 4096;
+    virt_addr_base += PAGE_SIZE;
+    length -= PAGE_SIZE;
 
     // Create a node for the rest of the virtual memory area
     vm_area_t *node = (vm_area_t *)(addr + 0xC0000000);
@@ -247,17 +247,17 @@ uint32_t vmm_unmap(uint32_t virt_addr) {
 uint32_t *vmm_malloc(uint32_t length) {
     uint32_t *virt_addr = get_vm_area(length);
 
-    if (virt_addr == NULL) { /* TODO: handle out of virtual memory */ }
+    if (virt_addr == NULL) return NULL; // TODO: implement better error handlng. page fault or call kswapd and retry?
 
     uint32_t *curr_virt_addr = virt_addr;
 
-    while (length >= 4096) {
-        uint32_t *phys_addr = pmm_malloc(4096);
+    while (length >= PAGE_SIZE) {
+        uint32_t *phys_addr = pmm_malloc(PAGE_SIZE);
         
         vmm_map((uint32_t)curr_virt_addr, (uint32_t)phys_addr, 0x3);
         
-        curr_virt_addr += 4096;
-        length -= 4096;
+        curr_virt_addr += PAGE_SIZE;
+        length -= PAGE_SIZE;
     }    
     
     return virt_addr;
@@ -286,12 +286,12 @@ void vmm_free(uint32_t virt_addr, uint32_t length) {
         node = node->next;
     }
 
-    while (length >= 4096) {
+    while (length >= PAGE_SIZE) {
         uint32_t phys_addr = vmm_unmap(virt_addr);
 
-        pmm_free(phys_addr, 4096);
+        pmm_free(phys_addr, PAGE_SIZE);
 
-        virt_addr += 4096;
-        length -= 4096;
+        virt_addr += PAGE_SIZE;
+        length -= PAGE_SIZE;
     }
 }

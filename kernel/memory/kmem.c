@@ -34,9 +34,9 @@ static object_t *object_alloc(cache_t *cache) {
         object_t *obj = target_slab->head;
 
         target_slab->head = obj->next;
-        target_slab->inuse++;
+        target_slab->in_use++;
 
-        if (target_slab->inuse == cache->num) {
+        if (target_slab->in_use == cache->num) {
             cache->slabs_partial = NULL;
             cache->slabs_full = target_slab;
         }
@@ -50,9 +50,9 @@ static object_t *object_alloc(cache_t *cache) {
         object_t *obj = target_slab->head;
 
         target_slab->head = obj->next;
-        target_slab->inuse++;
+        target_slab->in_use++;
 
-        if (target_slab->inuse == cache->num) {
+        if (target_slab->in_use == cache->num) {
             cache->slabs_empty = NULL;
             cache->slabs_full = target_slab;
         } else {
@@ -76,7 +76,7 @@ static object_t *object_alloc(cache_t *cache) {
 static void slab_cache_grow(uint32_t base, uint32_t length) {
     slab_t *slab = (slab_t *)(base);
     slab->head = NULL;
-    slab->inuse = 0;
+    slab->in_use = 0;
     
     uint32_t end = base + length;
     
@@ -109,37 +109,39 @@ static void slab_cache_grow(uint32_t base, uint32_t length) {
  */
 static void cache_grow(cache_t *cache) {
    if (slab_cache->slabs_empty == NULL && slab_cache->slabs_partial == NULL) {
-        uint32_t *addr = vmm_malloc(4096);
+        uint32_t *addr = vmm_malloc(PAGE_SIZE);
 
-        if (addr == NULL) { /* TODO: handle out of virtual memory */ }
-
-        slab_cache_grow((uint32_t)addr, 4096);
+        slab_cache_grow((uint32_t)addr, PAGE_SIZE);
    }
 
    object_t *slab_obj = object_alloc(slab_cache);
 
    slab_t *new_slab = (slab_t *)slab_obj;
    new_slab->head = NULL;
-   new_slab->inuse = 0;
+   new_slab->in_use = 0;
 
-   uint32_t *addr = vmm_malloc(4096);
-
-   if (addr == NULL) { /* TODO: handle out of virtual memory */ }
+   uint32_t *addr = vmm_malloc(PAGE_SIZE);
 
    // Create and link 4 KiB of objects for the slab
-   uint32_t end = (uint32_t)addr + 4096;
+   uint32_t end = (uint32_t)addr + PAGE_SIZE;
 
-   while ((uint32_t)addr + cache->objsize < end) {
+   while ((uint32_t)addr + cache->obj_size < end) {
         object_t *obj = (object_t *)addr;
 
         obj->next = new_slab->head;
         new_slab->head = obj;
 
-        addr = (uint32_t *)((uint32_t)addr + cache->objsize);
+        addr = (uint32_t *)((uint32_t)addr + cache->obj_size);
    }
 
    cache->slabs_empty = new_slab;
 }
+
+/* TODO: cache shrinking
+static void cache_shrink() {
+
+}
+*/
 
 /**
  * @brief Creates a new cache for objects of a specific size.
@@ -149,17 +151,17 @@ static void cache_grow(cache_t *cache) {
  * initial slab of objects. If the cache of caches has no free cache structures
  * available, it is grown first.
  *
- * @param objsize The size of objects that will be stored in this cache.
+ * @param obj_size The size of objects that will be stored in this cache.
  * @return Pointer to the newly created cache.
  */
-static cache_t *cache_create(uint32_t objsize) {
+static cache_t *cache_create(uint32_t obj_size) {
     if (cache_cache->slabs_empty == NULL && cache_cache->slabs_partial == NULL) cache_grow(cache_cache);
 
     object_t *cache_obj = object_alloc(cache_cache);
 
     cache_t *new_cache = (cache_t *)cache_obj;
 
-    cache_init(new_cache, objsize);
+    cache_init(new_cache, obj_size);
     cache_grow(new_cache);
 
     return new_cache;
@@ -174,11 +176,11 @@ static cache_t *cache_create(uint32_t objsize) {
  * slabs until it is grown.
  *
  * @param cache Pointer to the cache structure to initialize.
- * @param objsize The size of objects that will be stored in this cache.
+ * @param obj_size The size of objects that will be stored in this cache.
  */
-static void cache_init(cache_t *cache, uint32_t objsize) {
-    cache->objsize = objsize;
-    cache->num = 4096 / objsize;
+static void cache_init(cache_t *cache, uint32_t obj_size) {
+    cache->obj_size = obj_size;
+    cache->num = PAGE_SIZE / obj_size;
     cache->next = NULL;
     cache->slabs_full = NULL;
     cache->slabs_partial = NULL;
@@ -195,7 +197,7 @@ static void cache_init(cache_t *cache, uint32_t objsize) {
  */
 void kmem_init() {
     // Allocate one page for slab struct cache and the cache's slab objects
-    uint32_t addr = (uint32_t)vmm_malloc(4096);
+    uint32_t addr = (uint32_t)vmm_malloc(PAGE_SIZE);
 
     // Initialize slab struct cache
     slab_cache = (cache_t *)addr;
@@ -208,7 +210,7 @@ void kmem_init() {
     addr = addr + sizeof(cache_t);
 
     // Add first slabs to the slab cache
-    slab_cache_grow(addr, 4096 - (2 * sizeof(cache_t)));
+    slab_cache_grow(addr, PAGE_SIZE - (2 * sizeof(cache_t)));
     
     // Use slab cache to grow cache_cache
     cache_grow(cache_cache);
@@ -237,12 +239,12 @@ void kmem_init() {
  * @return Pointer to the allocated memory, or NULL if allocation fails.
  */
 void *kmalloc(uint32_t length) {
-    if (length > 2048) return vmm_malloc(length);
+    if (length > PAGE_SIZE / 2) return vmm_malloc(length);
 
     cache_t *curr = cache_chain;
 
     while (curr != NULL) {
-        if (curr->objsize >= length) return object_alloc(curr);
+        if (curr->obj_size >= length) return object_alloc(curr);
 
         curr = curr->next;
     }
@@ -266,7 +268,7 @@ void *kmalloc(uint32_t length) {
 void kfree(void *obj, uint32_t length) {
     uint32_t addr = (uint32_t)obj;
     
-    if (length > 2048) {
+    if (length > PAGE_SIZE / 2) {
         vmm_free(addr, length);
         return;
     }
@@ -274,7 +276,7 @@ void kfree(void *obj, uint32_t length) {
     cache_t *curr = cache_chain;
 
     while (curr->next != NULL) {  
-        if (curr->objsize >= length) break;
+        if (curr->obj_size >= length) break;
 
         curr = curr->next;
     }
@@ -287,7 +289,7 @@ void kfree(void *obj, uint32_t length) {
 
         head->next = target_slab->head;
         target_slab->head = head;
-        target_slab->inuse--;
+        target_slab->in_use--;
 
         curr->slabs_full = NULL;
         curr->slabs_partial = target_slab;
@@ -298,9 +300,9 @@ void kfree(void *obj, uint32_t length) {
 
         head->next = target_slab->head;
         target_slab->head = head;
-        target_slab->inuse--;
+        target_slab->in_use--;
 
-        if (target_slab->inuse == 0) {
+        if (target_slab->in_use == 0) {
             curr->slabs_partial = NULL;
             curr->slabs_empty = target_slab;
         }

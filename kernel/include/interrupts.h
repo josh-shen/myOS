@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Global Descriptor Table */
+/************************** Global Descriptor Table **************************/
 struct gdt_entry {
     uint16_t limit_low;
     uint16_t base_low;
@@ -22,7 +22,7 @@ typedef struct gdt_ptr gdt_ptr_t;
 
 void gdt_init(void);
 
-/* Interrupt Descriptor Table */
+/************************ Interrupt Descriptor Table *************************/
 struct idt_entry {
     uint16_t offset_low;
     uint16_t selector;
@@ -41,7 +41,7 @@ typedef struct idt_ptr idt_ptr_t;
 void idt_init(void);
 void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
 
-/* Interrupt Service Routines */
+/************************ Interrupt Service Routines *************************/
 struct registers {
    uint32_t esp_dump;                                 // Function argument pointer
    uint32_t ds;                                       // Processor state before interrupt
@@ -54,7 +54,7 @@ typedef struct registers registers_t;
 void isr_init(void);
 void isr_handler(registers_t regs);
 
-/* Interrupt Requests */
+/**************************** Interrupt Requests *****************************/
 typedef void (*isr_t)();
 
 void irq_init(void);
