@@ -3,6 +3,8 @@
 
 #include <memory.h>
 
+#include "stdio.h"
+
 static uint32_t get_current_pd();
 static uint32_t create_new_pt();
 static void split(vm_area_t *, uint32_t);
@@ -14,7 +16,7 @@ page_directory_t boot_page_directory __attribute__((section(".page_tables")))__a
 page_table_t boot_page_tables[4] __attribute__((section(".page_tables")))__attribute__((aligned(PAGE_SIZE)));
 
 // Kernel vm area linked list
-vm_area_t *head = NULL;
+static vm_area_t *head = NULL;
 
 /**
  * @brief Retrieves the current page directory address from the CR3 register.
@@ -92,7 +94,7 @@ static void merge(vm_area_t *node) {
         }
 
         node->size = node->size + next->size;
-        node->next = next->next;
+        next = next->next;
 
         kfree(next, sizeof(vm_area_t));
     }
@@ -148,27 +150,43 @@ void vmm_init(uint32_t virt_addr_base) {
     // Allocate a page for inital linked list node
     uint32_t addr = (uint32_t)pmm_malloc(PAGE_SIZE);
 
-    // Create one 4 KiB node - this will be used to initialize the slab allocator
-    vm_area_t *page_node = (vm_area_t *)(addr + 0xC0000000);
-    page_node->addr = virt_addr_base;
-    page_node->size = PAGE_SIZE;
-    page_node->used = 0;
-    page_node->next = NULL;
+    // Pre-split 9 4 KiB nodes - these will be used to initialize the slab allocator
+    for (int i = 0; i < 9; i++) {
+        vm_area_t *page_node = (vm_area_t *)(addr + 0xC0000000);
+        page_node->addr = virt_addr_base;
+        page_node->size = PAGE_SIZE;
+        page_node->used = 0;
+        page_node->next = NULL;
 
-    head = page_node;
-    
-    addr += sizeof(vm_area_t);
-    virt_addr_base += PAGE_SIZE;
-    length -= PAGE_SIZE;
+        addr += sizeof(vm_area_t);
+        virt_addr_base += PAGE_SIZE;
+        length -= PAGE_SIZE;
+
+        // Insert node at tail
+        if (head == NULL) {
+            head = page_node;
+            continue;
+        }
+        vm_area_t *curr = head;
+        while (curr->next != NULL) {
+            curr = curr->next;
+        }
+        curr->next = page_node;
+    }
 
     // Create a node for the rest of the virtual memory area
     vm_area_t *node = (vm_area_t *)(addr + 0xC0000000);
     node->addr = virt_addr_base;
     node->size = length;
     node->used = 0;
-    node->next = head;
-    
-    head->next = node;
+    node->next = NULL;
+
+    // Insert node at tail
+    vm_area_t *curr = head;
+    while (curr->next != NULL) {
+        curr = curr->next;
+    }
+    curr->next = node;
 }
 
 /**

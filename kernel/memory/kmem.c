@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
-
+#include <stdio.h>
 #include <memory.h>
 
 static object_t *object_alloc(cache_t *);
@@ -37,7 +37,11 @@ static object_t *object_alloc(cache_t *cache) {
         target_slab->in_use++;
 
         if (target_slab->in_use == cache->num) {
-            cache->slabs_partial = NULL;
+            // Set new partial slab list head
+            cache->slabs_partial = target_slab->next;
+
+            // Move slab to full list
+            target_slab->next = cache->slabs_full;
             cache->slabs_full = target_slab;
         }
 
@@ -52,11 +56,16 @@ static object_t *object_alloc(cache_t *cache) {
         target_slab->head = obj->next;
         target_slab->in_use++;
 
+        // Set new empty slab list head
+        cache->slabs_empty = target_slab->next;
+
         if (target_slab->in_use == cache->num) {
-            cache->slabs_empty = NULL;
+            // Move slab to full list
+            target_slab->next = cache->slabs_full;
             cache->slabs_full = target_slab;
         } else {
-            cache->slabs_empty = NULL;
+            // Move slab to partial list
+            target_slab->next = cache->slabs_partial;
             cache->slabs_partial = target_slab;
         }
 
@@ -72,6 +81,9 @@ static object_t *object_alloc(cache_t *cache) {
  * requires alllocating additional memory from the virtual memory manager. It
  * creates a linked list of slab objects within the allocated memory range. All
  * created slab objects are added to the empty slabs list of the slab cache.
+ *
+ * @param base Starting address of allocated virtual memory range
+ * @param length Size of allocated memory range
  */
 static void slab_cache_grow(uint32_t base, uint32_t length) {
     slab_t *slab = (slab_t *)(base);
@@ -91,7 +103,8 @@ static void slab_cache_grow(uint32_t base, uint32_t length) {
 
         base += sizeof(object_t);
     }
-    
+
+    slab->next = slab_cache->slabs_empty;
     slab_cache->slabs_empty = slab;
 }
 
@@ -108,33 +121,35 @@ static void slab_cache_grow(uint32_t base, uint32_t length) {
  * @param cache Pointer to the cache to grow.
  */
 static void cache_grow(cache_t *cache) {
-   if (slab_cache->slabs_empty == NULL && slab_cache->slabs_partial == NULL) {
-        uint32_t *addr = vmm_malloc(PAGE_SIZE);
+    if (slab_cache->slabs_empty == NULL && slab_cache->slabs_partial == NULL) {
+       uint32_t *addr = vmm_malloc(PAGE_SIZE);
 
-        slab_cache_grow((uint32_t)addr, PAGE_SIZE);
-   }
+       slab_cache_grow((uint32_t)addr, PAGE_SIZE);
+    }
 
-   object_t *slab_obj = object_alloc(slab_cache);
+    object_t *slab_obj = object_alloc(slab_cache);
 
-   slab_t *new_slab = (slab_t *)slab_obj;
-   new_slab->head = NULL;
-   new_slab->in_use = 0;
+    slab_t *new_slab = (slab_t *)slab_obj;
+    new_slab->head = NULL;
+    new_slab->in_use = 0;
+    new_slab->next = NULL;
 
-   uint32_t *addr = vmm_malloc(PAGE_SIZE);
+    uint32_t *addr = vmm_malloc(PAGE_SIZE);
 
-   // Create and link 4 KiB of objects for the slab
-   uint32_t end = (uint32_t)addr + PAGE_SIZE;
+    // Create and link 4 KiB of objects for the slab
+    uint32_t end = (uint32_t)addr + PAGE_SIZE;
 
-   while ((uint32_t)addr + cache->obj_size < end) {
+    while ((uint32_t)addr + cache->obj_size < end) {
         object_t *obj = (object_t *)addr;
 
         obj->next = new_slab->head;
         new_slab->head = obj;
 
         addr = (uint32_t *)((uint32_t)addr + cache->obj_size);
-   }
+    }
 
-   cache->slabs_empty = new_slab;
+    new_slab->next = cache->slabs_empty;
+    cache->slabs_empty = new_slab;
 }
 
 /* TODO: cache shrinking
@@ -196,30 +211,41 @@ static void cache_init(cache_t *cache, uint32_t obj_size) {
  * general-purpose caches for object sizes from 32 bytes to 2048 bytes.
  */
 void kmem_init() {
-    // Allocate one page for slab struct cache and the cache's slab objects
-    uint32_t addr = (uint32_t)vmm_malloc(PAGE_SIZE);
+    // Initialize slab cache
+    uint32_t slab_page = (uint32_t)vmm_malloc(PAGE_SIZE);
 
-    // Initialize slab struct cache
-    slab_cache = (cache_t *)addr;
+    slab_cache = (cache_t *)slab_page;
     cache_init(slab_cache, sizeof(slab_t));
-    addr = addr + sizeof(cache_t);
-    
-    // Initialize the cache struct cache
-    cache_cache = (cache_t *)(addr);
-    cache_init(cache_cache, sizeof(cache_t));
-    addr = addr + sizeof(cache_t);
+    slab_cache_grow(slab_page + sizeof(cache_t), PAGE_SIZE - sizeof(cache_t));
 
-    // Add first slabs to the slab cache
-    slab_cache_grow(addr, PAGE_SIZE - (2 * sizeof(cache_t)));
-    
-    // Use slab cache to grow cache_cache
-    cache_grow(cache_cache);
+    // Initialize cache cache
+    uint32_t cache_page = (uint32_t)vmm_malloc(PAGE_SIZE);
+
+    cache_cache = (cache_t *)cache_page;
+    cache_init(cache_cache, sizeof(cache_t));
+
+    // Grow cache_cache with the rest of this page
+    uint32_t addr = cache_page + sizeof(cache_t);
+
+    slab_t *cache_slab = (slab_t *)object_alloc(slab_cache);
+    cache_slab->head = NULL;
+    cache_slab->in_use = 0;
+    cache_slab->next = NULL;
+
+    uint32_t end = cache_page + PAGE_SIZE;
+
+    while (addr + sizeof(cache_t) < end) {
+        object_t *obj = (object_t *)addr;
+        obj->next = cache_slab->head;
+        cache_slab->head = obj;
+        addr += sizeof(cache_t);
+    }
+
+    cache_cache->slabs_empty = cache_slab;
 
     // Create general purpose caches for sizes 2^5 to 2^11
     for (int i = 11; i >= 5; i--) {
         cache_t *cache = cache_create(1 << i);
-
-        if (cache_chain == NULL) cache_chain = cache;
 
         cache->next = cache_chain;
         cache_chain = cache;
@@ -275,7 +301,7 @@ void kfree(void *obj, uint32_t length) {
 
     cache_t *curr = cache_chain;
 
-    while (curr->next != NULL) {  
+    while (curr->next != NULL) {
         if (curr->obj_size >= length) break;
 
         curr = curr->next;

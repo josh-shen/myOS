@@ -91,8 +91,9 @@ struct object {
 typedef struct object object_t;
 
 struct slab {
+    struct slab *next;
     struct object *head;
-    uint32_t in_use; // number of objects in use in inthe slab
+    uint32_t in_use; // number of objects in use in in the slab
 };
 typedef struct slab slab_t;
 
